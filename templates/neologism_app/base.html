@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+    {% csrf_token %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Detector de Neologismos{% endblock %}</title>
@@ -348,6 +349,9 @@
                     {% endfor %}
                 </ul>
             {% endif %}
+
+            <!-- Mensagens de feedback AJAX (NOVO) -->
+            <div id="ajax-message-container" class="hidden status-message" style="margin-top: 10px;"></div>
 
             {% block content %}{% endblock %}
         </div>

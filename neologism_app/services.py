@@ -18,6 +18,32 @@ CUSTOM_ADDITIONS_PATH = os.path.join(DATA_DIR, 'custom_additions.txt')
 NEOLOGISMS_VALIDATED_PATH = os.path.join(DATA_DIR, 'neologisms_validated.txt')
 DICIO_CACHE_PATH = os.path.join(DATA_DIR, 'dicio_cache.json')
 
+# --- Mapeamento de Classes Gramaticais (PARA EXIBIÇÃO E FILTRAGEM) ---
+# Classes gramaticais que são candidatas a neologismos (substantivo, adjetivo, verbo)
+CANDIDATE_POS_TAGS = {"NOUN", "ADJ", "VERB"}
+
+# Mapeia POS tags do spaCy para classes gramaticais mais legíveis em português
+POS_MAPPING = {
+    "NOUN": "Substantivo",
+    "PROPN": "Substantivo Próprio", # PROPN (Nomes Próprios) geralmente são eliminados por NER, mas mantido no mapping para completude
+    "ADJ": "Adjetivo",
+    "VERB": "Verbo",
+    "ADV": "Advérbio",
+    "PRON": "Pronome",
+    "DET": "Determinante",
+    "ADP": "Preposição",
+    "AUX": "Verbo Auxiliar",
+    "CCONJ": "Conjunção Coordenativa",
+    "SCONJ": "Conjunção Subordinativa",
+    "NUM": "Numeral",
+    "INTJ": "Interjeição",
+    "PART": "Partícula",
+    "SYM": "Símbolo",
+    "X": "Outros", # Para palavras não classificadas ou estrangeiras
+    "SPACE": "Espaço", # spaCy pode ter tokens de espaço
+    "PUNCT": "Pontuação", # spaCy pode ter tokens de pontuação
+}
+
 # --- Cache para Dicio.com.br ---
 DICIO_CACHE = {}
 # LRU Cache para Dicio (evitar que o cache cresça indefinidamente)
@@ -173,12 +199,14 @@ class NeologismDetector:
         sentences = [sent.text for sent in doc.sents]
 
         for token in doc:
-            # Ignora pontuação, espaços, números
-            if token.is_punct or token.is_space or token.like_num:
+            # 1. Manter espaços e ignorar pontuação/números se não forem palavras para análise
+            if token.is_space: # Adiciona o espaço e continua para o próximo token
                 processed_html_parts.append(token.text)
                 continue
+            if token.is_punct or token.like_num: # Ignora pontuação ou números
+                processed_html_parts.append(token.text + token.whitespace_)
+                continue
 
-            # Converte para minúsculas para comparação (mas mantém o original para exibição)
             word_lower = token.text.lower()
             original_word = token.text
             
@@ -187,57 +215,60 @@ class NeologismDetector:
             clean_original_word = re.sub(r'^\W+|\W+$', '', original_word)
 
             if not clean_word_lower: # Se a palavra ficou vazia após limpeza, pular
-                processed_html_parts.append(original_word)
+                processed_html_parts.append(original_word + token.whitespace_)
                 continue
 
             total_words += 1
             is_neologism_candidate = False
 
-            # 1. Eliminar Nomes Próprios (Feature 1)
+            # 2. Eliminar Nomes Próprios (Feature 1)
             # spaCy marca Nomes Próprios (PROPN) e Entidades Nomeadas (PERSON, LOC, ORG, etc.)
             if token.pos_ == "PROPN" or token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]:
-                # print(f"DEBUG: '{original_word}' é um nome próprio ou entidade nomeada ({token.ent_type_}). Ignorando.")
-                processed_html_parts.append(original_word)
+                processed_html_parts.append(original_word + token.whitespace_)
                 continue
 
-            # 2. Verificar no Léxico Local
+            # 3. FILTRAR POR CLASSE GRAMATICAL (NOVA CONDIÇÃO)
+            # Somente processa palavras que podem ser neologismos (substantivo, adjetivo, verbo)
+            if token.pos_ not in CANDIDATE_POS_TAGS:
+                # print(f"DEBUG: '{original_word}' é '{token.pos_}'. Ignorando por tipo.")
+                processed_html_parts.append(original_word + token.whitespace_)
+                continue
+
+            # 4. Verificar no Léxico Local
             if clean_word_lower not in self.lexicon:
-                # 3. Enriquecer o filtro com Dicio.com.br (Feature 2)
+                # 5. Enriquecer o filtro com Dicio.com.br (Feature 2)
                 if not is_word_in_dicio(clean_word_lower):
                     is_neologism_candidate = True
                 else:
-                    # Se encontrada no Dicio, adicionar à lista de adições personalizadas
-                    # para evitar futuras consultas ao Dicio e futuras marcações
                     self.add_to_custom_additions(clean_word_lower)
             
             if is_neologism_candidate:
                 num_neologisms += 1
                 processed_html_parts.append(
                     f'<span class="neologism" data-word="{clean_original_word}" '
-                    f'data-pos="{token.pos_}" data-lemma="{token.lemma_}" '
+                    f'data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{token.lemma_}" ' # <--- USAR POS_MAPPING AQUI
                     f'data-sent-idx="{self._get_sentence_index(token, doc)}">'
-                    f'{original_word}</span>'
+                    f'{original_word}</span>{token.whitespace_}' # <--- ADICIONAR O WHITESPACE
                 )
                 if clean_word_lower not in seen_neologism_candidates:
                     # Feature 4: Classe Gramatical
-                    # Feature 6: Sentença (apenas a palavra, a sentença completa será adicionada depois)
                     neologism_candidates.append({
                         'word': clean_original_word,
                         'word_lower': clean_word_lower,
-                        'pos': token.pos_,
+                        'pos': POS_MAPPING.get(token.pos_, token.pos_), # <--- USAR POS_MAPPING AQUI
                         'lemma': token.lemma_,
                         'sentence_idx': self._get_sentence_index(token, doc)
                     })
                     seen_neologism_candidates.add(clean_word_lower)
             else:
-                processed_html_parts.append(original_word)
+                processed_html_parts.append(original_word + token.whitespace_) # <--- ADICIONAR O WHITESPACE
 
         return {
             'processed_text_html': "".join(processed_html_parts),
             'neologism_candidates': neologism_candidates,
             'total_words': total_words,
             'num_neologisms': num_neologisms,
-            'sentences': sentences # Adiciona as sentenças para exportação
+            'sentences': sentences
         }
 
     def _get_sentence_index(self, token, doc):
@@ -270,25 +301,7 @@ class NeologismDetector:
         filepath = os.path.join(DATA_DIR, filename) # Salva no diretório data
         
         # Mapeia POS tags do spaCy para classes gramaticais mais legíveis
-        pos_mapping = {
-            "NOUN": "Substantivo",
-            "PROPN": "Substantivo Próprio", # Embora tentemos remover, pode haver exceções
-            "ADJ": "Adjetivo",
-            "VERB": "Verbo",
-            "ADV": "Advérbio",
-            "PRON": "Pronome",
-            "DET": "Determinante",
-            "ADP": "Preposição",
-            "AUX": "Verbo Auxiliar",
-            "CCONJ": "Conjunção Coordenativa",
-            "SCONJ": "Conjunção Subordinativa",
-            "NUM": "Numeral",
-            "INTJ": "Interjeição",
-            "PART": "Partícula",
-            "SYM": "Símbolo",
-            "X": "Outros", # Para palavras não classificadas ou estrangeiras
-            # Adicione mais conforme necessário
-        }
+        pos_mapping = POS_MAPPING
 
         # Simulação para 'processo de formação' (Feature 5 - futura)
         # Por enquanto, será "Não classificado" ou "Outros"

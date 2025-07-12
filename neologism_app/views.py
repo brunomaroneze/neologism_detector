@@ -111,14 +111,24 @@ def export_csv(request):
     Exporta os resultados da última detecção para um arquivo CSV (Feature 6).
     """
     detection_results = request.session.get('detection_results', None)
-    if not detection_results:
-        messages.error(request, "Nenhum resultado de detecção para exportar.")
-        return redirect('neologism_app:index')
+    if not detection_results or not detection_results.get('neologism_candidates'):
+        messages.error(request, "Nenhum resultado de neologismos para exportar.")
+        return redirect('neologism_app:results') # Redireciona para a página de resultados
 
-    # Chamar a função de exportação do service
     csv_filepath = detector.export_results_to_csv(detection_results)
 
     if csv_filepath and os.path.exists(csv_filepath):
+        # Adiciona uma mensagem de sucesso antes de retornar o arquivo
+        messages.success(request, f"Arquivo CSV '{os.path.basename(csv_filepath)}' gerado com sucesso!")
+        
+        # O Django Messages não é exibido automaticamente se o retorno for um HttpResponse de arquivo.
+        # Uma estratégia comum é forçar um redirecionamento *após* o download ou lidar com isso via JS.
+        # No entanto, o navegador geralmente lida com o download e não exibe a mensagem de redirecionamento.
+        # Para ver a mensagem, o usuário precisaria voltar à página de resultados.
+        #
+        # A melhor abordagem para feedback imediato para download é via JavaScript.
+        # Por enquanto, manteremos a mensagem do Django (que é útil se o download for via link e não JS).
+        
         with open(csv_filepath, 'rb') as f:
             response = HttpResponse(f.read(), content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="{os.path.basename(csv_filepath)}"'
