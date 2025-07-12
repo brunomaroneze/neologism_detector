@@ -1,0 +1,13 @@
+casa
+carro
+pessoa
+computador
+água
+sol
+lua
+palavra
+detecção
+linguagem
+programação
+python
+django

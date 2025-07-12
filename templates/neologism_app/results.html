@@ -1,0 +1,141 @@
+{% extends 'neologism_app/base.html' %}
+
+{% block title %}Resultados da Detecção{% endblock %}
+
+{% block content %}
+<div class="results">
+    <div class="results-header">
+        <h3>Resultados da Análise</h3>
+        <div class="stats">
+            <span>Total de palavras: <strong id="total-words">{{ total_words }}</strong></span>
+            <span>Neologismos detectados: <strong id="num-neologisms">{{ num_neologisms }}</strong></span>
+        </div>
+    </div>
+    
+    <p class="status-message status-info">Clique nas palavras marcadas para mais informações ou use a lista de candidatos abaixo para validar.</p>
+
+    <div class="processed-text" id="processed-text-display">
+        {{ processed_text_html|safe }}
+    </div>
+
+    {% if neologism_candidates %}
+    <div class="candidate-list">
+        <h3>Candidatos a Neologismos</h3>
+        <p class="status-message status-info">Clique em "Não é neologismo" para adicionar a palavra ao seu léxico pessoal e não a marcar mais. Clique em "Aceitar neologismo" para registrar como um neologismo validado (para futuros treinamentos de ML).</p>
+        <div id="neologism-candidate-container">
+            {% for candidate in neologism_candidates %}
+            <div class="candidate-item" id="candidate-{{ forloop.counter }}">
+                <div class="candidate-info">
+                    <span class="candidate-word">{{ candidate.word }}</span>
+                    <span class="candidate-pos">({{ candidate.pos|lower }})</span>
+                </div>
+                <div class="candidate-actions">
+                    <button class="btn btn-small btn-reject validate-btn" data-word="{{ candidate.word }}" data-action="reject_neologism">Não é neologismo</button>
+                    <button class="btn btn-small btn-accept validate-btn" data-word="{{ candidate.word }}" data-action="accept_neologism">Aceitar neologismo</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div style="margin-top: 20px; text-align: center;">
+            <a href="{% url 'neologism_app:export_csv' %}" class="btn btn-primary" id="export-csv-btn">Exportar para CSV</a>
+        </div>
+    </div>
+    {% else %}
+    <p class="status-message status-complete">Nenhum neologismo detectado neste texto ou todos já foram validados!</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const validateButtons = document.querySelectorAll('.validate-btn');
+        const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        const processedTextDisplay = document.getElementById('processed-text-display');
+        const neologismCandidateContainer = document.getElementById('neologism-candidate-container');
+        const totalWordsSpan = document.getElementById('total-words');
+        const numNeologismsSpan = document.getElementById('num-neologisms');
+
+        validateButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const word = this.dataset.word;
+                const action = this.dataset.action;
+                const candidateItem = this.closest('.candidate-item');
+
+                fetch('/validate_neologism/', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrftoken,
+                        'X-Requested-With': 'XMLHttpRequest', // Indica que é uma requisição AJAX
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `word=${encodeURIComponent(word)}&action=${encodeURIComponent(action)}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' || data.status === 'info') {
+                        // Exibir mensagem de sucesso/info (poderia usar os messages do Django, mas para AJAX, JS é mais rápido)
+                        alert(data.message); 
+
+                        // Remover o item da lista de candidatos
+                        if (candidateItem) {
+                            candidateItem.remove();
+                            
+                            // Atualizar a contagem de neologismos na UI
+                            let currentNumNeologisms = parseInt(numNeologismsSpan.textContent);
+                            numNeologismsSpan.textContent = Math.max(0, currentNumNeologisms - 1);
+
+                            // Remover a marcação do texto processado
+                            // Isso é um pouco mais complexo: precisaria de uma lógica para re-renderizar o HTML
+                            // ou remover a classe dinamicamente.
+                            // Por simplicidade, vamos apenas remover a classe 'neologism' para a palavra validada.
+                            // Note: Isso só remove a *primeira* ocorrência que encontrar. 
+                            // Para todas, precisaríamos de um loop ou regex.
+                            const markedWords = processedTextDisplay.querySelectorAll(`.neologism[data-word="${word}"]`);
+                            markedWords.forEach(el => {
+                                el.outerHTML = el.textContent; // Substitui o span pelo texto puro
+                            });
+                        }
+                        // Se não houver mais candidatos, esconder a seção de candidatos
+                        if (neologismCandidateContainer && neologismCandidateContainer.children.length === 0) {
+                            const candidateListSection = neologismCandidateContainer.closest('.candidate-list');
+                            if (candidateListSection) {
+                                candidateListSection.innerHTML = '<p class="status-message status-complete">Todos os candidatos foram validados!</p>';
+                            }
+                        }
+
+                    } else {
+                        alert('Erro: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro na requisição AJAX:', error);
+                    alert('Ocorreu um erro ao processar sua solicitação.');
+                });
+            });
+        });
+
+        // Adicionar funcionalidade para o clique nos neologismos no texto (opcional)
+        // Isso pode exibir um tooltip ou modal com mais informações (POS, sugestão de formação)
+        // Por enquanto, apenas um alerta simples.
+        processedTextDisplay.addEventListener('click', function(event) {
+            const target = event.target;
+            if (target.classList.contains('neologism')) {
+                const word = target.dataset.word;
+                const pos = target.dataset.pos;
+                const lemma = target.dataset.lemma;
+                const sentenceIdx = target.dataset.sentIdx;
+                
+                let info = `Palavra: ${word}\n`;
+                info += `Classe Gramatical: ${pos}\n`;
+                info += `Lema: ${lemma}\n`;
+                // Poderíamos adicionar a sentença completa aqui buscando do texto original,
+                // mas para isso o texto original completo ou as sentenças deveriam estar no DOM
+                // ou ser recuperadas via AJAX.
+                
+                alert(`Detalhes do Neologismo:\n${info}`);
+            }
+        });
+    });
+</script>
+{% endblock %}
