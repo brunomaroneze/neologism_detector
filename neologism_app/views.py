@@ -7,7 +7,7 @@ import json
 import os
 
 # Importar o detector do services.py
-from .services import detector, DICIO_CACHE_PATH # Importa a instância do detector e o caminho do cache
+from .services import detector, DICIO_CACHE_PATH, POS_MAPPING, FORMATION_PROCESS_OPTIONS # <--- Importar mapeamentos e opções
 
 def index(request):
     """View para a página inicial com o formulário de entrada de texto."""
@@ -52,26 +52,27 @@ def results(request):
 
 def validate_neologism(request):
     """
-    Endpoint para validação de neologismos via AJAX (Feature 3).
-    O usuário pode marcar uma palavra como neologismo real ou como "não é neologismo" (erro/palavra comum).
+    Endpoint para validação de neologismos via AJAX.
+    Lida com:
+    - 'reject_neologism': usuário diz que não é neologismo.
+    - 'save_classification': usuário fornece classificação detalhada.
     """
     if request.method == 'POST' and request.headers.get('x-requested-with') == 'XMLHttpRequest':
         word = request.POST.get('word')
-        action = request.POST.get('action') # 'accept_neologism' ou 'reject_neologism'
+        action = request.POST.get('action') # 'reject_neologism' ou 'save_classification'
 
         if not word or not action:
             return JsonResponse({'status': 'error', 'message': 'Dados inválidos.'}, status=400)
 
-        if action == 'reject_neologism': # Usuário diz "não é neologismo", adicionar ao léxico local
+        if action == 'reject_neologism': # Usuário diz "não é neologismo"
             if detector.add_to_custom_additions(word):
-                message = f"'{word}' adicionado ao seu léxico pessoal. Não será mais marcado como neologismo."
+                message = f"'{word}' adicionado ao seu léxico pessoal e removido dos neologismos."
                 status = 'success'
             else:
                 message = f"'{word}' já está no seu léxico pessoal."
                 status = 'info'
-            # Remove a palavra do cache do Dicio se ela foi rejeitada,
-            # para forçar uma nova consulta se ela for marcada como neologismo por engano
-            # ou para limpar o cache de palavras que o usuário validou como 'comuns'.
+            
+            # Limpa o cache do Dicio para a palavra rejeitada, se houver
             try:
                 with open(DICIO_CACHE_PATH, 'r+', encoding='utf-8') as f:
                     cache_data = json.load(f)
@@ -83,51 +84,43 @@ def validate_neologism(request):
             except Exception as e:
                 print(f"Erro ao atualizar cache do Dicio para '{word}': {e}")
 
+        elif action == 'save_classification': # Usuário classificou o neologismo
+            original_pos_tag = request.POST.get('original_pos_tag') # POS do spaCy
+            corrected_pos_tag = request.POST.get('corrected_pos_tag') # POS corrigido pelo usuário (em português)
+            lemma = request.POST.get('lemma')
+            formation_process = request.POST.get('formation_process')
 
-        elif action == 'accept_neologism': # Usuário diz "é um neologismo", para o treinamento futuro de ML
-            if detector.add_to_neologisms_validated(word):
-                message = f"'{word}' marcado como neologismo validado. Ótimo para o futuro treinamento de ML!"
+            if detector.add_to_neologisms_validated(word, original_pos_tag, corrected_pos_tag, lemma, formation_process):
+                message = f"'{word}' classificado e salvo com sucesso para futuro treinamento de ML!"
                 status = 'success'
             else:
-                message = f"'{word}' já está na lista de neologismos validados."
-                status = 'info'
+                message = f"Erro ao salvar a classificação de '{word}'."
+                status = 'error'
+            
+            # Não remove do cache do Dicio aqui, pois a palavra é um neologismo validado.
+
         else:
             return JsonResponse({'status': 'error', 'message': 'Ação inválida.'}, status=400)
         
-        # Após a validação, se quiser reprocessar o texto automaticamente, você pode fazer
-        # isso aqui e retornar os novos resultados HTML/candidatos.
-        # Por enquanto, apenas retornamos a mensagem de sucesso.
-        
-        # O ideal seria que a página de resultados fosse atualizada dinamicamente
-        # após a validação, removendo o item da lista de candidatos e do texto marcado.
-        # Isso pode ser feito com JavaScript no `results.html`.
-
         return JsonResponse({'status': status, 'message': message})
     return JsonResponse({'status': 'error', 'message': 'Método não permitido.'}, status=405)
-
 
 def export_csv(request):
     """
     Exporta os resultados da última detecção para um arquivo CSV (Feature 6).
     """
     detection_results = request.session.get('detection_results', None)
+    
+    # Verifica se há neologismos detectados, não apenas se a chave existe
     if not detection_results or not detection_results.get('neologism_candidates'):
-        messages.error(request, "Nenhum resultado de neologismos para exportar.")
-        return redirect('neologism_app:results') # Redireciona para a página de resultados
+        messages.error(request, "Nenhum neologismo detectado para exportar para CSV.")
+        return redirect('neologism_app:results')
 
     csv_filepath = detector.export_results_to_csv(detection_results)
 
     if csv_filepath and os.path.exists(csv_filepath):
-        # Adiciona uma mensagem de sucesso antes de retornar o arquivo
+        # A mensagem será exibida apenas se o usuário navegar de volta ou a página for recarregada
         messages.success(request, f"Arquivo CSV '{os.path.basename(csv_filepath)}' gerado com sucesso!")
-        
-        # O Django Messages não é exibido automaticamente se o retorno for um HttpResponse de arquivo.
-        # Uma estratégia comum é forçar um redirecionamento *após* o download ou lidar com isso via JS.
-        # No entanto, o navegador geralmente lida com o download e não exibe a mensagem de redirecionamento.
-        # Para ver a mensagem, o usuário precisaria voltar à página de resultados.
-        #
-        # A melhor abordagem para feedback imediato para download é via JavaScript.
-        # Por enquanto, manteremos a mensagem do Django (que é útil se o download for via link e não JS).
         
         with open(csv_filepath, 'rb') as f:
             response = HttpResponse(f.read(), content_type='text/csv')
