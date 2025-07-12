@@ -124,5 +124,14 @@
     "publicada": true,
     "portuguesa": true,
     "destinado": true,
-    "aprendizes": true
+    "aprendizes": true,
+    "paraquedas": true,
+    "extinguiram-se": false,
+    "abra-se": false,
+    "dividiu-se": false,
+    "chamá-lo": false,
+    "tomá-la": false,
+    "fazê-las": false,
+    "comovê-la": false,
+    "expande-se": false
 }
