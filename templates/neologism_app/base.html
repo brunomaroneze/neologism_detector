@@ -330,6 +330,125 @@
                 width: 100%;
             }
         }
+
+        /* Adicione o CSS para o modal (NOVO) */
+        .modal {
+            display: none; /* Escondido por padrão */
+            position: fixed; /* Fica no lugar mesmo com scroll */
+            z-index: 1000; /* Acima de tudo */
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto; /* Permite scroll se o conteúdo for muito grande */
+            background-color: rgba(0,0,0,0.4); /* Fundo preto semi-transparente */
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto; /* Centraliza vertical e horizontalmente */
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            width: 80%; /* Largura do modal */
+            max-width: 600px; /* Largura máxima */
+            animation-name: animatetop;
+            animation-duration: 0.4s;
+            position: relative; /* Para o botão de fechar */
+        }
+
+        /* Animação para o modal */
+        @keyframes animatetop {
+            from {top: -300px; opacity: 0}
+            to {top: 0; opacity: 1}
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 1.8em;
+        }
+
+        .close-button {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+
+        .close-button:hover,
+        .close-button:focus {
+            color: #3498db;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .modal-body label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .modal-body span, .modal-body select, .modal-body input {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .modal-body span {
+            background-color: #f0f0f0;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+
+        /* Ajustes para os botões do modal */
+        .modal .btn {
+            padding: 10px 20px;
+            font-size: 15px;
+            border-radius: 8px;
+        }
+        .modal .btn-cancel {
+            background: #95a5a6;
+            color: white;
+        }
+        .modal .btn-cancel:hover {
+            background: #7f8c8d;
+        }
+        .modal .btn-save {
+            background: linear-gradient(135deg, #27ae60, #229954);
+            color: white;
+        }
+        .modal .btn-save:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -338,6 +457,7 @@
         <div class="header">
             <h1>🔍 Detector de Neologismos</h1>
             <p>Ferramenta para identificação automática de neologismos em textos</p>
+            <p>AINDA EM FASE DE TESTES</p> <!-- NOVO: Mensagem de aviso sobre a fase de testes -->
         </div>
 
         <div class="main-content">
@@ -354,6 +474,53 @@
             <div id="ajax-message-container" class="hidden status-message" style="margin-top: 10px;"></div>
 
             {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <!-- Estrutura do Modal (NOVO) -->
+    <div id="neologismModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Classificar Neologismo</h2>
+                <span class="close-button">×</span>
+            </div>
+            <div class="modal-body">
+                <label for="modal-word">Palavra:</label>
+                <span id="modal-word"></span>
+
+                <label for="modal-original-pos">Classe Gramatical (sugerida):</label>
+                <span id="modal-original-pos"></span>
+                
+                <label for="modal-lemma">Lema:</label>
+                <span id="modal-lemma"></span>
+
+                <label for="modal-corrected-pos">Classe Gramatical (correta):</label>
+                <select id="modal-corrected-pos">
+                    <option value="">Selecione a classe</option>
+                    <option value="Substantivo">Substantivo</option>
+                    <option value="Adjetivo">Adjetivo</option>
+                    <option value="Verbo">Verbo</option>
+                    <option value="Outros">Outros (não substantivo/adjetivo/verbo)</option>
+                </select>
+
+                <label for="modal-formation-process">Processo de Formação:</label>
+                <select id="modal-formation-process">
+                    <option value="">Selecione o processo</option>
+                    <option value="Derivação Prefixal">Derivação Prefixal</option>
+                    <option value="Derivação Sufixal">Derivação Sufixal</option>
+                    <option value="Composição">Composição</option>
+                    <option value="Estrangeirismo">Estrangeirismo</option>
+                    <option value="Outros casos">Outros casos</option>
+                </select>
+
+                <label for="modal-sentence-context">Sentença:</label>
+                <span id="modal-sentence-context"></span>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel close-button">Cancelar</button>
+                <button class="btn btn-reject modal-reject-btn">Não é neologismo</button> <!-- Botão para rejeitar via modal -->
+                <button class="btn btn-save" id="modal-save-button">Salvar Classificação</button>
+            </div>
         </div>
     </div>
 
