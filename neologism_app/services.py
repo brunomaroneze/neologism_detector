@@ -153,10 +153,6 @@ class NeologismDetector:
             return spacy.load("pt_core_news_sm")
     
     def process_text(self, text):
-        """
-        Processa o texto para detectar neologismos, consultando o banco de dados.
-        Retorna o texto HTML marcado e uma lista de candidatos.
-        """
         doc = self.nlp(text)
         processed_html_parts = []
         neologism_candidates = []
@@ -192,33 +188,57 @@ class NeologismDetector:
                 processed_html_parts.append(original_word + token.whitespace_)
                 continue
 
-            # 3. FILTRAR POR CLASSE GRAMATICAL
             if token.pos_ not in CANDIDATE_POS_TAGS:
                 processed_html_parts.append(original_word + token.whitespace_)
                 continue
 
-            # 4. Verificar no LÉXICO DO BANCO DE DADOS (NOVA LÓGICA CHAVE AQUI)
-            # Verifica se a palavra existe em LexiconWord OU CustomAddition
-            is_word_in_db_lexicon = LexiconWord.objects.filter(word=clean_word_lower).exists() or \
-                                   CustomAddition.objects.filter(word=clean_word_lower).exists()
+            # ================================================================
+            # NOVA LÓGICA CHAVE: Verificação do Léxico no Banco de Dados
+            # ================================================================
 
-            if not is_word_in_db_lexicon: # Se NÃO está no léxico do DB
+            # 1. Verificar a forma limpa da palavra (ex: "amá-lo", "oferta-relâmpago")
+            found_by_word_form = LexiconWord.objects.filter(word=clean_word_lower).exists() or \
+                                 CustomAddition.objects.filter(word=clean_word_lower).exists()
+
+            # 2. Verificar o lema do spaCy
+            found_by_lemma = False
+            lemma_to_check = token.lemma_.lower() # Converte o lema para minúsculas
+
+            if ' ' in lemma_to_check:
+                # Se o lema é composto (ex: "amar ele"), verifica apenas o primeiro componente (o verbo)
+                main_lemma_part = lemma_to_check.split(' ')[0]
+                if LexiconWord.objects.filter(word=main_lemma_part).exists() or \
+                   CustomAddition.objects.filter(word=main_lemma_part).exists():
+                    found_by_lemma = True
+            else:
+                # Se o lema é uma única palavra (ex: "casa", "vender", "elegiar")
+                if LexiconWord.objects.filter(word=lemma_to_check).exists() or \
+                   CustomAddition.objects.filter(word=lemma_to_check).exists():
+                    found_by_lemma = True
+
+            is_word_in_db_lexicon = found_by_word_form or found_by_lemma
+
+            # ================================================================
+            # FIM DA NOVA LÓGICA
+            # ================================================================
+
+            if not is_word_in_db_lexicon: # Se a palavra (ou seu lema) NÃO está no léxico do DB
                 # 5. Enriquecer o filtro com Dicio.com.br
-                if not is_word_in_dicio(clean_word_lower):
+                if not is_word_in_dicio(clean_word_lower): # Ainda consulta Dicio com a forma limpa
                     is_neologism_candidate = True
                 else:
-                    # Se encontrada no Dicio, adicionar à CustomAddition (via DB)
+                    # Se encontrada no Dicio, adicionar a CustomAddition (via DB)
+                    # Adicionamos a forma limpa da palavra que foi encontrada no Dicio.
                     self.add_to_custom_additions(clean_word_lower)
 
             if is_neologism_candidate:
                 num_neologisms += 1
-                # Passa o token.pos_ original para o modal, para comparação
                 processed_html_parts.append(
                     f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
-                    f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" ' # <--- LEMMA TAMBÉM PODE TER CARACTERES ESPECIAIS
-                f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
-                f'data-sentence-text="{html.escape(sentences[self._get_sentence_index(token, doc)])}">' # <--- ESCAPE NA SENTENÇA TAMBÉM
-                f'{html.escape(original_word)}</span>{token.whitespace_}' # <--- ESCAPE AQUI
+                    f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" ' # Lema original do spaCy, para o usuário ver e corrigir
+                    f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
+                    f'data-sentence-text="{html.escape(sentences[self._get_sentence_index(token, doc)])}">'
+                    f'{html.escape(original_word)}</span>{token.whitespace_}'
                 )
                 if clean_word_lower not in seen_neologism_candidates:
                     neologism_candidates.append({
@@ -226,7 +246,7 @@ class NeologismDetector:
                         'word_lower': clean_word_lower,
                         'original_pos': token.pos_,
                         'pos': POS_MAPPING.get(token.pos_, token.pos_),
-                        'lemma': token.lemma_,
+                        'lemma': token.lemma_, # Lema original do spaCy
                         'sentence_idx': self._get_sentence_index(token, doc),
                         'sentence_text': sentences[self._get_sentence_index(token, doc)]
                     })
