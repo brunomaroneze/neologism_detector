@@ -313,7 +313,7 @@ class NeologismDetector:
                  if any(char in 'kqwy' for char in word_lower) and len(word_lower) > 3: return "Estrangeirismo (sugerido)?"
             return "Outros casos / Não classificado"
 
-        fieldnames = ['neologismo', 'classe_gramatical', 'processo_formacao', 'sentenca']
+        fieldnames = ['neologismo', 'lema', 'classe_gramatical', 'processo_formacao', 'sentenca']
         
         unique_candidates = {}
         for candidate in results['neologism_candidates']:
@@ -333,11 +333,14 @@ class NeologismDetector:
         for word_lower, details in unique_candidates.items():
             original_word = details['word']
             original_pos_tag_spacy = details['original_pos'] # O POS do spaCy
+            original_lemma_spacy = details['lemma'] # <--- PEGAR O LEMA ORIGINAL DO SPACY
             
             validated_neo = NeologismValidated.objects.filter(word=word_lower).first()
             
             # Classe gramatical para CSV: usa a corrigida pelo usuário, senão a do spaCy mapeada
             csv_pos_tag = validated_neo.pos_tag if validated_neo and validated_neo.pos_tag else pos_mapping.get(original_pos_tag_spacy, 'Não identificado')
+
+            csv_lemma = validated_neo.lemma if validated_neo and validated_neo.lemma else original_lemma_spacy
 
             # Processo de formação: usa o corrigido pelo usuário, senão a heurística
             csv_formation_process = get_formation_process_for_csv(word_lower, original_pos_tag_spacy)
@@ -349,6 +352,7 @@ class NeologismDetector:
 
                 data_to_export.append({
                     'neologismo': original_word,
+                    'lema': csv_lemma,
                     'classe_gramatical': csv_pos_tag,
                     'processo_formacao': csv_formation_process,
                     'sentenca': highlighted_sentence
