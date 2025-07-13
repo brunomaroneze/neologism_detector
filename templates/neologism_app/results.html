@@ -1,4 +1,5 @@
 {% extends 'neologism_app/base.html' %}
+{% load static %}
 
 {% block title %}Resultados da Detecção{% endblock %}
 
@@ -47,67 +48,10 @@
     {% else %}
     <p class="status-message status-complete">Nenhum neologismo detectado neste texto ou todos já foram validados!</p>
     {% endif %}
+        
 </div>
 {% endblock %}
 
-<!-- Modal de Classificação -->
-<div id="neologismModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Classificar Neologismo</h2>
-            <button type="button" class="close-button">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="modal-field">
-                <label>Palavra:</label>
-                <strong id="modal-word"></strong>
-            </div>
-            <div class="modal-field">
-                <label>Classe Gramatical Original:</label>
-                <span id="modal-original-pos"></span>
-            </div>
-            <div class="modal-field">
-                <label>Lema:</label>
-                <span id="modal-lemma"></span>
-            </div>
-            <div class="modal-field">
-                <label for="modal-corrected-pos">Classe Gramatical Correta:</label>
-                <select id="modal-corrected-pos">
-                    <option value="">Selecione...</option>
-                    <option value="Substantivo">Substantivo</option>
-                    <option value="Adjetivo">Adjetivo</option>
-                    <option value="Verbo">Verbo</option>
-                    <option value="Advérbio">Advérbio</option>
-                    <option value="Outros">Outros</option>
-                </select>
-            </div>
-            <div class="modal-field">
-                <label for="modal-formation-process">Processo de Formação:</label>
-                <select id="modal-formation-process">
-                    <option value="">Selecione...</option>
-                    <option value="derivacao_prefixal">Derivação prefixal</option>
-                    <option value="derivacao_sufixal">Derivação sufixal</option>
-                    <option value="derivacao_parassintética">Derivação parassintética</option>
-                    <option value="composicao">Composição</option>
-                    <option value="emprestimo">Estrangeirismo</option>
-                    <option value="outros">Outros</option>
-                </select>
-            </div>
-            <div class="modal-field">
-                <label>Contexto da Sentença:</label>
-                <p id="modal-sentence-context"></p>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" id="modal-save-button" class="btn btn-primary">Salvar Classificação</button>
-            <button type="button" class="btn btn-reject modal-reject-btn">Não é neologismo</button>
-            <button type="button" class="btn close-button">Cancelar</button>
-        </div>
-    </div>
-</div>
-
 {% block extra_js %}
-
 <script src="{% static 'neologism_app/js/results_scripts.js' %}"></script>
-
 {% endblock %}

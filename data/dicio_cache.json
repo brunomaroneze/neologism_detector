@@ -133,5 +133,8 @@
     "tomá-la": false,
     "fazê-las": false,
     "comovê-la": false,
-    "expande-se": false
+    "expande-se": false,
+    "tranquilidade": true,
+    "pergunta-chave": true,
+    "lembre-se": false
 }
