@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import spacy
 import json
 from collections import deque # Para um cache LRU simples
+import html
 
 from django.db.models import Exists, OuterRef # Mantenha este import se já tiver
 from neologism_app.models import LexiconWord, CustomAddition, NeologismValidated # <--- IMPORTANTE: Importar os modelos
@@ -213,11 +214,11 @@ class NeologismDetector:
                 num_neologisms += 1
                 # Passa o token.pos_ original para o modal, para comparação
                 processed_html_parts.append(
-                    f'<span class="neologism" data-word="{clean_original_word}" '
-                    f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{token.lemma_}" '
-                    f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
-                    f'data-sentence-text="{sentences[self._get_sentence_index(token, doc)]}">' # Adicionado data-sentence-text para o span
-                    f'{original_word}</span>{token.whitespace_}'
+                    f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
+                    f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" ' # <--- LEMMA TAMBÉM PODE TER CARACTERES ESPECIAIS
+                f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
+                f'data-sentence-text="{html.escape(sentences[self._get_sentence_index(token, doc)])}">' # <--- ESCAPE NA SENTENÇA TAMBÉM
+                f'{html.escape(original_word)}</span>{token.whitespace_}' # <--- ESCAPE AQUI
                 )
                 if clean_word_lower not in seen_neologism_candidates:
                     neologism_candidates.append({
