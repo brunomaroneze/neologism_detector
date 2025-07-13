@@ -16,6 +16,7 @@ bin/
 db.sqlite3
 /media
 /static_collected
+staticfiles/
 
 # VSCode
 .vscode/
