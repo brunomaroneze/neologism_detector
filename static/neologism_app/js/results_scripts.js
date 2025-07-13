@@ -12,7 +12,7 @@
     const closeButtons = modal.querySelectorAll('.close-button');
     const modalWord = document.getElementById('modal-word');
     const modalOriginalPos = document.getElementById('modal-original-pos');
-    const modalLemma = document.getElementById('modal-lemma');
+    const modalLemmaInput = document.getElementById('modal-lemma-input');
     const modalCorrectedPos = document.getElementById('modal-corrected-pos');
     const modalFormationProcess = document.getElementById('modal-formation-process');
     const modalSentenceContext = document.getElementById('modal-sentence-context');
@@ -159,7 +159,7 @@
         const word = modalWord.textContent;
         const originalPosTag = modalOriginalPos.dataset.originalPos; // Pega o POS do spaCy
         const correctedPosTag = modalCorrectedPos.value;
-        const lemma = modalLemma.textContent;
+        const lemma = modalLemmaInput.value;
         const formationProcess = modalFormationProcess.value;
 
         // Validar se pelo menos uma opção foi selecionada para classe ou formação (opcional, mas boa prática)
@@ -199,7 +199,7 @@
         modalWord.textContent = word;
         modalOriginalPos.textContent = pos; // Exibe o POS mapeado (Substantivo, Adjetivo, Verbo)
         modalOriginalPos.dataset.originalPos = originalPos; // Guarda o POS original do spaCy
-        modalLemma.textContent = lemma;
+        modalLemmaInput.value = lemma;
         modalSentenceContext.textContent = sentenceText;
 
         // Pre-selecionar a classe gramatical sugerida se for uma das opções do select

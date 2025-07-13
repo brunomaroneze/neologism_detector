@@ -131,8 +131,8 @@ def is_word_in_dicio(word):
         return False
 
 FORMATION_PROCESS_OPTIONS = [ # Lista de opções para o dropdown no modal
-    "Derivação Prefixal",
-    "Derivação Sufixal",
+    "Derivação prefixal",
+    "Derivação sufixal",
     "Composição",
     "Estrangeirismo",
     "Outros casos"
@@ -307,10 +307,10 @@ class NeologismDetector:
             
             # Heurística simples se não estiver no DB ou não classificado
             if original_pos_tag:
-                 if word_lower.endswith("mente") and original_pos_tag == "ADJ": return "Derivação Sufixal (Sugerido)"
-                 if word_lower.startswith("des") and original_pos_tag == "VERB": return "Derivação Prefixal (Sugerido)"
-                 if re.match(r'^[a-zA-Z]+[_-][a-zA-Z]+$', word_lower): return "Composição (Sugerido)"
-                 if any(char in 'kqwy' for char in word_lower) and len(word_lower) > 3: return "Estrangeirismo (Sugerido)?"
+                 if word_lower.endswith("mente") and original_pos_tag == "ADJ": return "Derivação sufixal (sugerido)"
+                 if word_lower.startswith("des") and original_pos_tag == "VERB": return "Derivação prefixal (sugerido)"
+                 if re.match(r'^[a-zA-Z]+[_-][a-zA-Z]+$', word_lower): return "Composição (sugerido)"
+                 if any(char in 'kqwy' for char in word_lower) and len(word_lower) > 3: return "Estrangeirismo (sugerido)?"
             return "Outros casos / Não classificado"
 
         fieldnames = ['neologismo', 'classe_gramatical', 'processo_formacao', 'sentenca']

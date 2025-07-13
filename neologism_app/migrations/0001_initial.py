@@ -50,7 +50,7 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('word', models.CharField(max_length=100)),
                 ('word_class', models.CharField(choices=[('substantivo', 'Substantivo'), ('adjetivo', 'Adjetivo'), ('verbo', 'Verbo'), ('advérbio', 'Advérbio'), ('outros', 'Outros')], max_length=20)),
-                ('formation_type', models.CharField(choices=[('derivação_prefixal', 'Derivação Prefixal'), ('derivação_sufixal', 'Derivação Sufixal'), ('composição', 'Composição'), ('estrangeirismo', 'Estrangeirismo'), ('outros', 'Outros')], max_length=30)),
+                ('formation_type', models.CharField(choices=[('derivação_prefixal', 'Derivação prefixal'), ('derivação_sufixal', 'Derivação sufixal'), ('composição', 'Composição'), ('estrangeirismo', 'Estrangeirismo'), ('outros', 'Outros')], max_length=30)),
                 ('sentence_context', models.TextField()),
                 ('confidence_score', models.FloatField(default=0.0)),
                 ('status', models.CharField(choices=[('pending', 'Pendente'), ('confirmed', 'Confirmado'), ('rejected', 'Rejeitado')], default='pending', max_length=20)),
