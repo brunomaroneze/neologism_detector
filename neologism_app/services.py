@@ -8,6 +8,7 @@ import spacy
 import json
 from collections import deque # Para um cache LRU simples
 import html
+import unicodedata
 
 from django.db.models import Exists, OuterRef # Mantenha este import se já tiver
 from neologism_app.models import LexiconWord, CustomAddition, NeologismValidated # <--- IMPORTANTE: Importar os modelos
@@ -73,60 +74,79 @@ def is_word_in_dicio(word):
     """
     Verifica se uma palavra existe no Dicio.com.br usando web scraping.
     Usa um cache em memória e em disco para evitar requisições repetidas.
+    Lida com palavras acentuadas e detecção robusta de "não encontrada".
     """
-    word_lower = word.lower()
+    word_lower = word.lower() # Mantém a palavra original para o cache do Python
+    
+    # NOVO: Remover acentos para a consulta ao Dicio.com.br e para a chave do cache
+    # Normaliza para a forma de decomposição de caracteres e então ignora caracteres não-ASCII
+    dicio_query_word = unicodedata.normalize('NFKD', word_lower).encode('ascii', 'ignore').decode('utf-8')
 
-    # 1. Verifica no cache em memória
-    if word_lower in DICIO_CACHE:
+    # 1. Verifica no cache em memória usando a forma sem acento para a chave
+    if dicio_query_word in DICIO_CACHE:
         # Move a chave para o final do deque (mais recentemente usada)
-        if word_lower in DICIO_CACHE_KEYS:
-            DICIO_CACHE_KEYS.remove(word_lower)
-        DICIO_CACHE_KEYS.append(word_lower)
-        return DICIO_CACHE[word_lower]
+        if dicio_query_word in DICIO_CACHE_KEYS:
+            DICIO_CACHE_KEYS.remove(dicio_query_word)
+        DICIO_CACHE_KEYS.append(dicio_query_word)
+        return DICIO_CACHE[dicio_query_word]
 
     # 2. Se não estiver no cache, tenta buscar
-    print(f"Buscando '{word_lower}' no Dicio.com.br...")
-    url = f"https://www.dicio.com.br/{word_lower}/"
+    print(f"Buscando '{word_lower}' (query: '{dicio_query_word}') no Dicio.com.br...")
+    url = f"https://www.dicio.com.br/{dicio_query_word}/" # <--- USAR A PALAVRA SEM ACENTO AQUI
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     try:
         response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status() # Lança um HTTPError para 4xx/5xx erros
+        response.raise_for_status() # Lança um HTTPError para 4xx/5xx erros (e.g., 404 Not Found)
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Dicio.com.br retorna 404 ou uma página de "não encontrado" para palavras inexistentes.
-        # Procuramos por elementos que indicam uma definição.
-        # Elementos comuns que indicam definição: <p class="significado">, <div class="conjugacao">, etc.
-        # Ou a ausência de uma mensagem de "palavra não encontrada".
-        # Vamos procurar por uma div com a classe "significado" ou "tit-sub" (para conjugação, etc.)
-        definition_found = soup.find('p', class_='significado') or \
-                           soup.find('div', class_='tit-sub')
+        # NOVO: DETECÇÃO DE "NÃO ENCONTRADA"
+        # 1. Verificar se a classe específica de "não encontrada" está presente.
+        word_nf_element = soup.find('p', class_='significado word-nf')
+        
+        if word_nf_element:
+            # Se encontrou 'significado word-nf', a palavra NÃO existe no Dicio.
+            is_present = False
+        else:
+            # Se não há a classe de "não encontrada", procurar por indicadores de definição real.
+            # Isso é para o caso de a palavra existir, mas não ter a classe 'significado' ou se tiver outras seções.
+            definition_indicators = [
+                soup.find('p', class_='significado'), # Procura por p.significado SEM o word-nf (já filtrado acima)
+                soup.find('div', class_='tit-sub'),
+                soup.find('div', class_='conjugacao'),
+                soup.find('h2', class_='tit-section'),
+            ]
+            # A palavra é considerada presente se pelo menos um dos indicadores for encontrado.
+            is_present = any(indicator is not None for indicator in definition_indicators)
 
-        is_present = definition_found is not None
-
-        # 3. Adiciona ao cache
+        # 3. Adiciona ao cache usando a forma sem acento para a chave
         if len(DICIO_CACHE_KEYS) >= MAX_CACHE_SIZE:
-            oldest_key = DICIO_CACHE_KEYS.popleft() # Remove o item menos usado
+            oldest_key = DICIO_CACHE_KEYS.popleft()
             DICIO_CACHE.pop(oldest_key, None)
 
-        DICIO_CACHE[word_lower] = is_present
-        DICIO_CACHE_KEYS.append(word_lower)
-        save_dicio_cache() # Salva o cache em disco após cada adição
+        DICIO_CACHE[dicio_query_word] = is_present # <--- Chave do cache é a palavra sem acento
+        DICIO_CACHE_KEYS.append(dicio_query_word)
+        save_dicio_cache()
 
         return is_present
+    except requests.exceptions.HTTPError as e:
+        # Se for um erro HTTP 4xx/5xx (e.g., 404 Not Found), a palavra não existe.
+        print(f"HTTP Error {e.response.status_code} ao consultar Dicio para '{word_lower}' (query: '{dicio_query_word}'): {e}. Assumindo não encontrada.")
+        DICIO_CACHE[dicio_query_word] = False # <--- Cache com a palavra sem acento
+        DICIO_CACHE_KEYS.append(dicio_query_word)
+        save_dicio_cache()
+        return False
     except requests.exceptions.RequestException as e:
-        print(f"Erro ao consultar Dicio para '{word_lower}': {e}")
-        # Em caso de erro, assumimos que a palavra não foi encontrada para não travar.
-        # Podemos cachear como False ou não cachear, dependendo da estratégia.
-        DICIO_CACHE[word_lower] = False # Cacheia como False para evitar novas tentativas com erros
-        DICIO_CACHE_KEYS.append(word_lower)
+        print(f"Erro de conexão/timeout ao consultar Dicio para '{word_lower}' (query: '{dicio_query_word}'): {e}. Assumindo não encontrada.")
+        DICIO_CACHE[dicio_query_word] = False # <--- Cache com a palavra sem acento
+        DICIO_CACHE_KEYS.append(dicio_query_word)
         save_dicio_cache()
         return False
     except Exception as e:
-        print(f"Erro inesperado ao parsear Dicio para '{word_lower}': {e}")
-        DICIO_CACHE[word_lower] = False
-        DICIO_CACHE_KEYS.append(word_lower)
+        print(f"Erro inesperado ao parsear Dicio para '{word_lower}' (query: '{dicio_query_word}'): {e}. Assumindo não encontrada.")
+        DICIO_CACHE[dicio_query_word] = False # <--- Cache com a palavra sem acento
+        DICIO_CACHE_KEYS.append(dicio_query_word)
         save_dicio_cache()
         return False
 
