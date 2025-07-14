@@ -2,33 +2,34 @@
 
 import os
 from django.core.management.base import BaseCommand, CommandError
-from neologism_app.models import LexiconWord, CustomAddition, NeologismValidated # Importe todos os modelos
+from neologism_app.models import LexiconWord, CustomAddition, NeologismValidated
 from django.db import transaction
 
 class Command(BaseCommand):
-    help = 'Imports words from a given text file into the LexiconWord or CustomAddition database table.'
+    help = 'Imports words from a given text file or manages database data for lexicon/custom/validated tables.'
 
     def add_arguments(self, parser):
-        parser.add_argument('file_path', type=str, help='The path to the text file containing words, one per line.')
+        # Argumento para o caminho do arquivo (opcional para operações de limpeza)
+        parser.add_argument('file_path', type=str, nargs='?', help='The path to the text file containing words.')
+        
+        # Argumento para qual tabela alvo
         parser.add_argument('--target', type=str, default='lexicon', 
-                            help='Target table: "lexicon" for LexiconWord or "custom" for CustomAddition. Default is lexicon.')
+                            help='Target table: "lexicon", "custom", or "validated". Default is lexicon.')
+        
+        # Argumento para tamanho do batch (para importação)
         parser.add_argument('--batch-size', type=int, default=1000, 
-                            help='Number of words to insert in a single batch. Default is 1000.')
-        parser.add_argument('--delete-existing', action='store_true', 
-                            help='Deletes all existing records in the target table before import.')
+                            help='Number of words to insert in a single batch (for import). Default is 1000.')
+        
+        # Argumento para DELETAR os dados existentes
+        parser.add_argument('--delete-all', action='store_true', 
+                            help='Deletes ALL existing records in the TARGET table before any import operation, or as a standalone cleanup.')
 
 
     def handle(self, *args, **options):
         file_path = options['file_path']
         target_table = options['target'].lower()
         batch_size = options['batch_size']
-        delete_existing = options['delete_existing']
-
-        if not os.path.exists(file_path):
-            raise CommandError(f'File "{file_path}" does not exist.')
-
-        if target_table not in ['lexicon', 'custom', 'validated']: # Adicionado 'validated' caso queira importar neologismos validados
-            raise CommandError('Invalid target. Must be "lexicon", "custom", or "validated".')
+        delete_all = options['delete_all']
 
         model = None
         if target_table == 'lexicon':
@@ -36,10 +37,27 @@ class Command(BaseCommand):
         elif target_table == 'custom':
             model = CustomAddition
         elif target_table == 'validated':
-            model = NeologismValidated # Note: este modelo tem mais campos, a importação aqui seria mais simples (só a palavra)
+            model = NeologismValidated
+        else:
+            raise CommandError('Invalid target. Must be "lexicon", "custom", or "validated".')
 
-        if delete_existing:
+        # Se a flag --delete-all foi usada, e não há file_path, execute apenas a limpeza
+        if delete_all and not file_path:
             self.stdout.write(self.style.WARNING(f'Deleting all existing records from {model.__name__}...'))
+            model.objects.all().delete()
+            self.stdout.write(self.style.SUCCESS('All records deleted successfully.'))
+            return # Sair se a operação for apenas de exclusão
+
+        # Se há um file_path, prossiga com a importação
+        if not file_path:
+            raise CommandError('A file_path is required for import operations. Use --delete-all without file_path to only clear data.')
+
+        if not os.path.exists(file_path):
+            raise CommandError(f'File "{file_path}" does not exist.')
+
+        # Se delete_all foi especificado junto com file_path, apaga antes de importar
+        if delete_all:
+            self.stdout.write(self.style.WARNING(f'Deleting all existing records from {model.__name__} before import...'))
             model.objects.all().delete()
             self.stdout.write(self.style.SUCCESS('Existing records deleted.'))
 
@@ -49,7 +67,6 @@ class Command(BaseCommand):
         total_skipped = 0
         words_to_create = []
 
-        # Para lidar com codificações
         encodings_to_try = ['utf-8', 'latin-1', 'cp1252']
         file_processed_successfully = False
 
@@ -63,15 +80,10 @@ class Command(BaseCommand):
                         if not word or word.startswith('#'):
                             continue
                         
-                        # Para LexiconWord e CustomAddition, só precisamos da palavra
-                        if model in [LexiconWord, CustomAddition]:
-                            words_to_create.append(model(word=word.lower()))
-                        elif model == NeologismValidated:
-                            # Se for NeologismValidated, pode ser que o arquivo tenha mais dados
-                            # Por simplicidade, aqui assumimos que também é apenas uma palavra por linha.
-                            # Se seu arquivo de neologismos validados tiver mais colunas (ex: CSV),
-                            # você precisará de uma lógica de parseamento mais complexa aqui.
-                            words_to_create.append(model(word=word.lower()))
+                        # Note: Importar para NeologismValidated apenas a palavra.
+                        # Se você quiser importar mais dados para NeologismValidated de um CSV,
+                        # esta seção precisaria ser mais complexa (ex: DictReader).
+                        words_to_create.append(model(word=word.lower()))
 
                         if len(words_to_create) >= batch_size:
                             try:
@@ -84,7 +96,7 @@ class Command(BaseCommand):
                                 self.stderr.write(self.style.ERROR(f'Error importing batch at line {line_num}: {e}'))
                             words_to_create = []
                 
-                self.stdout.write(self.style.SUCCESS(f"'{file_path}' processado com sucesso usando codificação '{encoding}'."))
+                self.stdout.write(self.style.SUCCESS(f"'{file_path}' processed successfully using codificação '{encoding}'."))
                 file_processed_successfully = True
                 break
             except UnicodeDecodeError as e:

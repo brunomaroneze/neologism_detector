@@ -184,10 +184,16 @@ class NeologismDetector:
         sentences = [sent.text for sent in doc.sents]
 
         for token in doc:
+            # DEBUG: Imprime o token original e suas propriedades iniciais
+            print(f"\n--- Processando Token: '{token.text}' (Index: {token.idx}) ---")
+            print(f"  POS: {token.pos_}, Lemma: {token.lemma_}, Ent_Type: {token.ent_type_}")
+
             if token.is_space:
+                print(f"  Ignorando: Espaço.")
                 processed_html_parts.append(token.text)
                 continue
             if token.is_punct or token.like_num:
+                print(f"  Ignorando: Pontuação ou Número.")
                 processed_html_parts.append(token.text + token.whitespace_)
                 continue
 
@@ -198,6 +204,7 @@ class NeologismDetector:
             clean_original_word = re.sub(r'^\W+|\W+$', '', original_word)
 
             if not clean_word_lower:
+                print(f"  Ignorando: Vazio após limpeza ('{original_word}').")
                 processed_html_parts.append(original_word + token.whitespace_)
                 continue
 
@@ -205,51 +212,57 @@ class NeologismDetector:
             is_neologism_candidate = False
 
             if token.pos_ == "PROPN" or token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]:
+                print(f"  Ignorando: Nome Próprio ou Entidade Nomeada ({token.pos_}/{token.ent_type_}).")
                 processed_html_parts.append(original_word + token.whitespace_)
                 continue
 
             if token.pos_ not in CANDIDATE_POS_TAGS:
+                print(f"  Ignorando: Classe Gramatical ('{token.pos_}') não é candidata a neologismo.")
                 processed_html_parts.append(original_word + token.whitespace_)
                 continue
-
-            # ================================================================
-            # NOVA LÓGICA CHAVE: Verificação do Léxico no Banco de Dados
-            # ================================================================
-
-            # 1. Verificar a forma limpa da palavra (ex: "amá-lo", "oferta-relâmpago")
-            found_by_word_form = LexiconWord.objects.filter(word=clean_word_lower).exists() or \
-                                 CustomAddition.objects.filter(word=clean_word_lower).exists()
-
-            # 2. Verificar o lema do spaCy
-            found_by_lemma = False
-            lemma_to_check = token.lemma_.lower() # Converte o lema para minúsculas
+         
+            # 4. Verificar no LÉXICO DO BANCO DE DADOS
+            found_by_word_form_in_lexicon = LexiconWord.objects.filter(word=clean_word_lower).exists()
+            found_by_word_form_in_custom = CustomAddition.objects.filter(word=clean_word_lower).exists()
+            
+            found_by_lemma_in_lexicon = False
+            found_by_lemma_in_custom = False
+            lemma_to_check = token.lemma_.lower()
 
             if ' ' in lemma_to_check:
-                # Se o lema é composto (ex: "amar ele"), verifica apenas o primeiro componente (o verbo)
                 main_lemma_part = lemma_to_check.split(' ')[0]
-                if LexiconWord.objects.filter(word=main_lemma_part).exists() or \
-                   CustomAddition.objects.filter(word=main_lemma_part).exists():
-                    found_by_lemma = True
+                found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=main_lemma_part).exists()
+                found_by_lemma_in_custom = CustomAddition.objects.filter(word=main_lemma_part).exists()
             else:
-                # Se o lema é uma única palavra (ex: "casa", "vender", "elegiar")
-                if LexiconWord.objects.filter(word=lemma_to_check).exists() or \
-                   CustomAddition.objects.filter(word=lemma_to_check).exists():
-                    found_by_lemma = True
+                found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=lemma_to_check).exists()
+                found_by_lemma_in_custom = CustomAddition.objects.filter(word=lemma_to_check).exists()
 
-            is_word_in_db_lexicon = found_by_word_form or found_by_lemma
+            is_word_in_db_lexicon = found_by_word_form_in_lexicon or \
+                                   found_by_word_form_in_custom or \
+                                   found_by_lemma_in_lexicon or \
+                                   found_by_lemma_in_custom
 
-            # ================================================================
-            # FIM DA NOVA LÓGICA
-            # ================================================================
+            print(f"  Verificando léxico (limpo: '{clean_word_lower}', lema: '{token.lemma_}')")
+            print(f"    Encontrado por forma limpa no léxico: {found_by_word_form_in_lexicon}")
+            print(f"    Encontrado por forma limpa nas custom: {found_by_word_form_in_custom}")
+            print(f"    Encontrado por lema no léxico: {found_by_lemma_in_lexicon}")
+            print(f"    Encontrado por lema nas custom: {found_by_lemma_in_custom}")
+            print(f"    Total no DB Léxico: {is_word_in_db_lexicon}")
 
+            
             if not is_word_in_db_lexicon: # Se a palavra (ou seu lema) NÃO está no léxico do DB
                 # 5. Enriquecer o filtro com Dicio.com.br
-                if not is_word_in_dicio(clean_word_lower): # Ainda consulta Dicio com a forma limpa
+                is_in_dicio = is_word_in_dicio(clean_word_lower)
+                print(f"  Verificando Dicio.com.br para '{clean_word_lower}': {is_in_dicio}")
+
+                if not is_in_dicio:
                     is_neologism_candidate = True
+                    print(f"  Marcado como NEOLOGISMO CANDIDATO.")
                 else:
-                    # Se encontrada no Dicio, adicionar a CustomAddition (via DB)
-                    # Adicionamos a forma limpa da palavra que foi encontrada no Dicio.
                     self.add_to_custom_additions(clean_word_lower)
+                    print(f"  NÃO é neologismo: Encontrado no Dicio. Adicionado a CustomAdditions.")
+            else:
+                print(f"  NÃO é neologismo: Encontrado no Léxico DB.")
 
             if is_neologism_candidate:
                 num_neologisms += 1
@@ -274,6 +287,7 @@ class NeologismDetector:
             else:
                 processed_html_parts.append(original_word + token.whitespace_)
 
+        print("\n--- Fim do Processamento do Texto ---")
         return {
             'processed_text_html': "".join(processed_html_parts),
             'neologism_candidates': neologism_candidates,
