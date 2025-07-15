@@ -6,13 +6,13 @@ import requests
 from bs4 import BeautifulSoup
 import spacy
 import json
-from collections import deque # Para um cache LRU simples
+from collections import deque 
 import html
 import unicodedata
-import joblib # Para carregar modelos de ML
-import numpy as np # Para manipulação de arrays
-import pandas as pd # Para criar DataFrames de features (para consistência)
-from scipy.sparse import hstack, csr_matrix # Para combinar features esparsas
+import joblib 
+import numpy as np 
+import pandas as pd 
+from scipy.sparse import hstack, csr_matrix 
 
 from django.db.models import Exists, OuterRef 
 from neologism_app.models import LexiconWord, CustomAddition, NeologismValidated 
@@ -24,10 +24,12 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 DICIO_CACHE_PATH = os.path.join(DATA_DIR, 'dicio_cache.json')
 
 # --- Configurações do spaCy para textos longos ---
-# O limite padrão do spaCy é 1.000.000 caracteres.
-# Para textos maiores, podemos processar em chunks.
-# Definir um chunk_size menor que o max_length padrão ou o aumentado.
-SPACY_CHUNK_SIZE = 900_000 # Um pouco abaixo do limite padrão de 1M para segurança
+# REDUZIR CHUNK_SIZE AINDA MAIS! Tentar 100_000 ou 50_000.
+SPACY_CHUNK_SIZE = 50_000 # <-- Reduzido novamente. Tentar 50_000 se ainda der erro.
+SPACY_MAX_LENGTH_NORMAL = 1_000_000 
+SPACY_MAX_LENGTH_LARGE_TEXT_PROCESSING = 2_000_000 
+
+TEXT_SIZE_THRESHOLD_FOR_LIGHT_SPACY = 1_000_000 
 
 # --- Mapeamento de Classes Gramaticais (PARA EXIBIÇÃO E FILTRAGEM) ---
 CANDIDATE_POS_TAGS = {"NOUN", "ADJ", "VERB"}
@@ -137,7 +139,7 @@ def is_word_in_dicio(word):
         return False
 
 # --- NOVAS CATEGORIAS DE NEOLOGISMOS (ATUALIZADO) ---
-FORMATION_PROCESS_OPTIONS = [ # Lista de opções para o dropdown no modal
+FORMATION_PROCESS_OPTIONS = [ 
     "composto neoclássico",
     "derivado prefixal",
     "estrangeirismo",
@@ -145,7 +147,7 @@ FORMATION_PROCESS_OPTIONS = [ # Lista de opções para o dropdown no modal
     "splinter",
     "composto",
     "sigla",
-    "outros" # Ajuste para 'outros' em vez de 'outros casos' para consistência
+    "outros" 
 ]
 
 # --- Carregar Modelos de ML e Ferramentas (NOVO BLOCO DE CÓDIGO) ---
@@ -174,7 +176,6 @@ except Exception as e:
 
 
 # --- Função de Engenharia de Features para Predição (NOVO) ---
-# Precisa ser IDÊNTICA à usada no treinamento em train_classifier.py
 def create_prediction_features(word):
     features = {}
     word_normalized = unicodedata.normalize('NFKD', word.lower()).encode('ascii', 'ignore').decode('utf-8')
@@ -185,13 +186,13 @@ def create_prediction_features(word):
     num_vowels = sum(1 for char in word_lower if char in 'aeiouáéíóúãõ')
     features['vowel_ratio'] = num_vowels / len(word_lower) if len(word_lower) > 0 else 0
 
-    for prefix in COMMON_PREFIXES_ML: # Usar as listas carregadas
+    for prefix in COMMON_PREFIXES_ML: 
         features[f'has_prefix_{prefix.replace("-", "")}'] = 1 if word_lower.startswith(prefix) else 0
 
     for suffix in COMMON_SUFFIXES_ML:
         features[f'has_suffix_{suffix.replace("-", "")}'] = 1 if word_lower.endswith(suffix) else 0
 
-    if FOREIGN_PATTERNS_ML: # Verificar se o dicionário foi carregado
+    if FOREIGN_PATTERNS_ML: 
         for letter in FOREIGN_PATTERNS_ML.get('letters', []):
             features[f'has_foreign_letter_{letter}'] = 1 if letter in word_lower else 0
         for pattern in FOREIGN_PATTERNS_ML.get('start_patterns', []):
@@ -209,81 +210,76 @@ def create_prediction_features(word):
 # --- Detector de Neologismos Principal ---
 class NeologismDetector:
     def __init__(self):
-        self.nlp = self._load_spacy_model()
-        # Aumentar o max_length do spaCy para acomodar textos ligeiramente maiores,
-        # mas ainda processar em chunks para textos MUITO grandes.
+        self.nlp = self._load_spacy_model(use_light_config=False) 
         try:
-            # Tentar aumentar o limite, se a máquina tiver RAM suficiente.
-            # Este valor pode precisar de ajuste fino.
-            self.nlp.max_length = 2_000_000 # Exemplo: 2 milhões de caracteres
+            self.nlp.max_length = SPACY_MAX_LENGTH_LARGE_TEXT_PROCESSING
         except ValueError as e:
-            print(f"Aviso: Não foi possível definir nlp.max_length: {e}. Usando valor padrão.")
-            # Se a máquina for pequena (como PythonAnywhere gratuito), pode falhar
+            print(f"Aviso: Não foi possível definir nlp.max_length para {SPACY_MAX_LENGTH_LARGE_TEXT_PROCESSING}: {e}. Usando valor padrão ou menor.")
 
-    def _load_spacy_model(self):
-        """Carrega o modelo spaCy para português."""
-        try:
-            return spacy.load("pt_core_news_sm")
-        except OSError:
-            print("Modelo spaCy 'pt_core_news_sm' não encontrado. Baixando...")
-            spacy.cli.download("pt_core_news_sm")
-            return spacy.load("pt_core_news_sm")
+        self.light_nlp = None 
+
+    def _load_spacy_model(self, use_light_config=False):
+        """Carrega o modelo spaCy para português, opcionalmente com uma configuração leve."""
+        if use_light_config:
+            print("Carregando modelo spaCy com configuração leve (desabilitando parser e NER) para economia de memória.")
+            try:
+                return spacy.load("pt_core_news_sm", disable=["parser", "ner"])
+            except OSError:
+                print("Modelo spaCy 'pt_core_news_sm' não encontrado. Baixando...")
+                spacy.cli.download("pt_core_news_sm") 
+                return spacy.load("pt_core_news_sm", disable=["parser", "ner"])
+        else:
+            print("Carregando modelo spaCy completo (pt_core_news_sm).")
+            try:
+                return spacy.load("pt_core_news_sm")
+            except OSError:
+                print("Modelo spaCy 'pt_core_news_sm' não encontrado. Baixando...")
+                spacy.cli.download("pt_core_news_sm")
+                return spacy.load("pt_core_news_sm")
     
     def process_text(self, text):
-        # Determine se o texto é muito grande para o display HTML
-        IS_LARGE_TEXT_FOR_DISPLAY = len(text) > 50000 # Definir um limite para exibir no HTML
-                                                      # ex: 50.000 caracteres (aprox. 10 páginas)
+        IS_LARGE_TEXT_FOR_DISPLAY = len(text) > 50000 
 
-        # Lógica para processar texto em chunks se for muito longo para o spaCy
-        # Coletar tokens, neologismos e sentenças de todos os chunks
-        all_tokens = []
+        nlp_instance_to_use = self.nlp 
+
+        if len(text) > TEXT_SIZE_THRESHOLD_FOR_LIGHT_SPACY:
+            if self.light_nlp is None:
+                self.light_nlp = self._load_spacy_model(use_light_config=True)
+            nlp_instance_to_use = self.light_nlp
+        
+        use_full_ner_filter = (nlp_instance_to_use == self.nlp) 
+
+        temp_doc_for_sents = None
+        sentences = [] # Inicializa como lista vazia, será populada se o spaCy funcionar
+
+        try:
+            temp_doc_for_sents = nlp_instance_to_use(text) 
+            sentences = [sent.text for sent in temp_doc_for_sents.sents]
+        except Exception as e:
+            print(f"ERRO: Falha ao segmentar sentenças do texto completo com spaCy ({e}). Não será possível obter contexto de sentenças exato para neologismos. Prosseguindo sem contexto de sentenças.")
+            sentences = [text] 
+
         all_neologism_candidates = []
-        all_sentences = []
-        current_token_idx_offset = 0 # Para ajustar os índices de token em chunks subsequentes
-        
-        # Divide o texto em pedaços para processamento pelo spaCy se exceder o limite
-        # O spaCy.make_doc é mais leve, e then `nlp.pipe` é mais eficiente.
-        # Mas para simplificar aqui, vamos usar slicing e nlp() individualmente.
-        
-        # Determine o max_length do modelo spaCy real para comparar.
-        # Se for o default 1M, chunk em 900k
-        # Se for 2M, chunk em 1.9M.
-        effective_spacy_max_length = self.nlp.max_length 
-        
-        if len(text) > effective_spacy_max_length:
-            print(f"Texto muito longo ({len(text)} chars) para processamento spaCy em uma única passada. Processando em chunks de {SPACY_CHUNK_SIZE} chars.")
-            # Quebrar texto em chunks
-            text_chunks = [text[i:i + SPACY_CHUNK_SIZE] for i in range(0, len(text), SPACY_CHUNK_SIZE)]
-        else:
-            text_chunks = [text] # Apenas um chunk se o texto cabe no limite
-
-        # Limpar 'seen_neologism_candidates' para cada novo processamento.
-        seen_neologism_candidates_global = set() # Usar um conjunto global para palavras únicas
-                                                # para não duplicar na lista de candidatos finais.
-        
+        seen_neologism_candidates_global = set()
         total_words = 0
         num_neologisms = 0
+        
+        # Inicia processed_html_parts aqui
+        processed_html_parts = []
 
-        # Iterar sobre os chunks
-        for chunk_text in text_chunks:
-            # CUIDADO: Nlp() em chunks pode cortar sentenças no meio.
-            # Uma solução mais avançada é tentar preservar sentenças inteiras nos chunks.
-            # Por simplicidade, vamos apenas processar o chunk.
-            doc = self.nlp(chunk_text)
-            
-            # Reconstituir sentenças completas da maneira mais robusta, se o texto foi chunked
-            # Se for chunked, sentenças podem estar cortadas. Não dá para confiar em doc.sents.
-            # Se IS_LARGE_TEXT_FOR_DISPLAY for True, não vamos exibir, então sentenças para CSV basta
-            # que sejam tokens, mas para contexto de ML, precisamos a sentença original.
-            # A forma mais robusta é ter um sentencizer separado que trabalhe no texto completo.
-            # Por enquanto, vou manter o doc.sents do chunk, e a lógica de sentence_idx funcionará se a sentença
-            # estiver dentro do chunk.
-            
-            # Coleta de sentenças do texto completo (antes do chunking) para uso no CSV e modal.
-            # Isto já é feito uma vez no início da função, e `sentences` já é global para todos os chunks
-            # O `_get_sentence_index` vai mapear de volta para o índice na lista `sentences`.
+        text_chunks = [text[i:i + SPACY_CHUNK_SIZE] for i in range(0, len(text), SPACY_CHUNK_SIZE)]
+        print(f"Processando {len(text)} caracteres em {len(text_chunks)} chunks de até {SPACY_CHUNK_SIZE} chars.")
 
-            for token in doc:
+
+        for chunk_idx, chunk_text in enumerate(text_chunks):
+            print(f"  Processando Chunk {chunk_idx + 1}/{len(text_chunks)}")
+            try:
+                chunk_doc = nlp_instance_to_use(chunk_text) 
+            except Exception as e:
+                print(f"ERRO: Falha ao processar chunk {chunk_idx + 1} com spaCy: {e}. Pulando este chunk.")
+                continue 
+
+            for token in chunk_doc:
                 if token.is_space:
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
                         processed_html_parts.append(token.text)
@@ -307,7 +303,9 @@ class NeologismDetector:
                 total_words += 1
                 is_neologism_candidate = False
 
-                if token.pos_ == "PROPN" or token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]:
+                # === LÓGICA DE FILTRAGEM DE NOMES PRÓPRIOS (AJUSTADA) ===
+                if (token.pos_ == "PROPN") or \
+                   (use_full_ner_filter and token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]):
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
                         processed_html_parts.append(original_word + token.whitespace_)
                     continue
@@ -348,6 +346,16 @@ class NeologismDetector:
                 else:
                     pass
 
+                # Obter índice da sentença e texto para o token atual
+                # CORREÇÃO CRÍTICA AQUI: A função _get_sentence_index_from_full_text
+                # DEVE ser chamada com o *offset de caractere no texto completo* e o *documento spaCy completo de sentenças*.
+                # O token.idx é relativo ao chunk, então precisamos ajustar.
+                original_token_start_char = token.idx + (chunk_idx * SPACY_CHUNK_SIZE) # <-- Correto para o offset
+                
+                sentence_idx_for_token = self._get_sentence_index_from_full_text(original_token_start_char, temp_doc_for_sents) # <-- Usar temp_doc_for_sents
+                
+                sentence_text_for_token = sentences[sentence_idx_for_token] if (sentence_idx_for_token != -1 and sentences and sentence_idx_for_token < len(sentences)) else "Sentença não encontrada" # <-- Checagem de bounds
+
                 if is_neologism_candidate:
                     num_neologisms += 1
                     
@@ -367,54 +375,61 @@ class NeologismDetector:
                             print(f"  Erro na classificação ML para '{clean_original_word}': {e}")
                             predicted_formation = "Erro na classificação ML"
 
-                    # Adiciona a marcação HTML apenas se o texto não for grande para display
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
                         processed_html_parts.append(
                             f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
                             f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" '
-                            f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
-                            f'data-sentence-text="{html.escape(sentences[self._get_sentence_index(token, doc)])}" '
+                            f'data-sent-idx="{sentence_idx_for_token}" ' # <-- Usar a variável corrigida
+                            f'data-sentence-text="{html.escape(sentence_text_for_token)}" ' # <-- Usar a variável corrigida
                             f'data-predicted-formation="{html.escape(predicted_formation)}">'
                             f'{html.escape(original_word)}</span>{token.whitespace_}'
                         )
                     else:
-                        # Se não vai para display, adiciona a palavra pura com seu espaço
                         processed_html_parts.append(original_word + token.whitespace_)
 
-                    if clean_word_lower not in seen_neologism_candidates_global: # Usar conjunto global
-                        all_neologism_candidates.append({ # Adiciona à lista global
+                    if clean_word_lower not in seen_neologism_candidates_global: 
+                        all_neologism_candidates.append({ 
                             'word': clean_original_word,
                             'word_lower': clean_word_lower,
                             'original_pos': token.pos_,
                             'pos': POS_MAPPING.get(token.pos_, token.pos_),
                             'lemma': token.lemma_,
-                            'sentence_idx': self._get_sentence_index(token, doc),
-                            'sentence_text': sentences[self._get_sentence_index(token, doc)],
+                            'sentence_idx': sentence_idx_for_token, # <-- Usar a variável corrigida
+                            'sentence_text': sentence_text_for_token, # <-- Usar a variável corrigida
                             'predicted_formation': predicted_formation
                         })
-                        seen_neologism_candidates_global.add(clean_word_lower) # Adiciona ao conjunto global
+                        seen_neologism_candidates_global.add(clean_word_lower) 
                 else:
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
                         processed_html_parts.append(original_word + token.whitespace_)
                     else:
-                        processed_html_parts.append(original_word + token.whitespace_) # Palavras não neologismos também precisam do seu espaço
+                        processed_html_parts.append(original_word + token.whitespace_) 
 
-        # Retorno final para a view
         return {
-            'processed_text_html': "".join(processed_html_parts) if not IS_LARGE_TEXT_FOR_DISPLAY else "", # Retorna vazio se texto for grande
-            'neologism_candidates': all_neologism_candidates, # Usa a lista global
+            'processed_text_html': "".join(processed_html_parts) if not IS_LARGE_TEXT_FOR_DISPLAY else "", 
+            'neologism_candidates': all_neologism_candidates, 
             'total_words': total_words,
             'num_neologisms': num_neologisms,
             'sentences': sentences, # A lista completa de sentenças
-            'is_large_text_for_display': IS_LARGE_TEXT_FOR_DISPLAY # Informa à view que o texto era grande
+            'is_large_text_for_display': IS_LARGE_TEXT_FOR_DISPLAY 
         }
 
-    def _get_sentence_index(self, token, doc):
-        """Retorna o índice da sentença à qual o token pertence."""
-        for i, sent in enumerate(doc.sents):
-            if token.idx >= sent.start_char and token.idx < sent.end_char:
-                return i
-        return -1 
+    def _get_sentence_index_from_full_text(self, char_offset_in_full_text, full_doc_for_sents):
+        """
+        Retorna o índice da sentença à qual o offset de caractere pertence no documento completo.
+        Retorna -1 se não encontrar ou se full_doc_for_sents não puder ser processado.
+        """
+        if not full_doc_for_sents:
+            return -1
+        # Itens em full_doc_for_sents.sents podem não ser listados aqui
+        # Se full_doc_for_sents.sents não for uma lista, ou se sent.start_char for None
+        # Para ser mais robusto, garantir que sent.start_char e sent.end_char existam
+        for i, sent in enumerate(full_doc_for_sents.sents):
+            if hasattr(sent, 'start_char') and hasattr(sent, 'end_char') and \
+               sent.start_char is not None and sent.end_char is not None:
+                if char_offset_in_full_text >= sent.start_char and char_offset_in_full_text < sent.end_char:
+                    return i
+        return -1
 
     # Funções de adição/validação (AGORA INTERAGEM COM OS MODELOS DB)
     def add_to_custom_additions(self, word):
