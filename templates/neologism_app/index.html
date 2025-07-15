@@ -3,10 +3,17 @@
 {% block title %}Detector de Neologismos - Início{% endblock %}
 
 {% block content %}
-<form method="post" action="{% url 'neologism_app:index' %}" class="input-section">
+<form method="post" action="{% url 'neologism_app:index' %}" class="input-section" enctype="multipart/form-data"> {# NOVO: enctype para upload de arquivos #}
     {% csrf_token %}
+    
     <label for="text_input">Cole seu texto aqui:</label>
     <textarea id="text_input" name="text_input" class="text-input" placeholder="Ex: 'O governismo é uma tendência política que busca a estabilização social pelo controle de novos lexicalismos...'">{{ original_text|default:'' }}</textarea>
+    
+    <div style="text-align: center; margin: 20px 0; color: #555;">OU</div>
+
+    <label for="file_upload">Faça upload de um arquivo TXT:</label>
+    <input type="file" id="file_upload" name="file_upload" accept=".txt" class="file-input"> {# NOVO: Input para upload #}
+
     <div class="controls" style="margin-top: 20px;">
         <button type="submit" class="btn btn-primary">Analisar Texto</button>
         <a href="{% url 'neologism_app:results' %}" class="btn btn-secondary">Ver Últimos Resultados</a>

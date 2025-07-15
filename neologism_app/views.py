@@ -5,29 +5,69 @@ from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 import json
 import os
+import io # Para lidar com arquivos em memória
 
 # Importar o detector do services.py
 from .services import detector, DICIO_CACHE_PATH, POS_MAPPING, FORMATION_PROCESS_OPTIONS # <--- Importar mapeamentos e opções
 
+# Adicione o max_upload_size para prevenir ataques de upload de arquivos muito grandes
+MAX_UPLOAD_SIZE = 5 * 1024 * 1024 # 5 MB
+
 def index(request):
-    """View para a página inicial com o formulário de entrada de texto."""
+    """View para a página inicial com o formulário de entrada de texto ou upload de arquivo."""
     if request.method == 'POST':
-        text = request.POST.get('text_input', '').strip()
+        text = None
+        
+        # 1. Tenta pegar o texto do textarea
+        text_input_from_form = request.POST.get('text_input', '').strip()
+        
+        # 2. Tenta pegar o arquivo de upload
+        uploaded_file = request.FILES.get('file_upload')
+
+        if text_input_from_form:
+            text = text_input_from_form
+            source_type = "textarea"
+        elif uploaded_file:
+            # Verifica o tamanho do arquivo
+            if uploaded_file.size > MAX_UPLOAD_SIZE:
+                messages.error(request, f"O arquivo '{uploaded_file.name}' é muito grande. O tamanho máximo permitido é {MAX_UPLOAD_SIZE / (1024 * 1024):.1f} MB.")
+                return render(request, 'neologism_app/index.html')
+            
+            # Verifica o tipo de arquivo (opcional, mas recomendado)
+            if not uploaded_file.name.lower().endswith('.txt'):
+                messages.error(request, f"Tipo de arquivo não suportado para '{uploaded_file.name}'. Por favor, envie apenas arquivos TXT.")
+                return render(request, 'neologism_app/index.html')
+
+            try:
+                # Lendo o conteúdo do arquivo
+                # uploaded_file.read() retorna bytes, precisamos decodificá-los para string
+                # Tentar UTF-8 primeiro, fallback para latin-1
+                file_content_bytes = uploaded_file.read()
+                try:
+                    text = file_content_bytes.decode('utf-8')
+                    source_type = "file_upload (UTF-8)"
+                except UnicodeDecodeError:
+                    text = file_content_bytes.decode('latin-1') # Tenta latin-1 como fallback
+                    source_type = "file_upload (Latin-1)"
+                
+            except Exception as e:
+                messages.error(request, f"Erro ao ler o arquivo '{uploaded_file.name}': {e}")
+                return render(request, 'neologism_app/index.html')
+        
         if not text:
-            messages.error(request, "Por favor, insira um texto para análise.")
+            messages.error(request, "Por favor, insira um texto ou faça o upload de um arquivo TXT para análise.")
             return render(request, 'neologism_app/index.html')
 
         # Armazena o texto na sessão para reuso se o usuário voltar à página
         request.session['text_to_process'] = text
 
         # Processa o texto usando o detector
-        # A instância 'detector' é global e persistente, evitando recarregar o modelo spaCy
         results = detector.process_text(text)
         
         # Armazena os resultados na sessão para serem acessados pela página de resultados
         request.session['detection_results'] = results
 
-        messages.success(request, "Texto processado com sucesso!")
+        messages.success(request, f"Texto processado com sucesso! Fonte: {source_type}")
         return redirect('neologism_app:results')
 
     return render(request, 'neologism_app/index.html')

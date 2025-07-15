@@ -11,31 +11,31 @@ body {
     padding: 20px;
 }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
 
-        .header {
-            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
+.header {
+    background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
 
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
+.header h1 {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+}
 
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
+.header p {
+    font-size: 1.1em;
+    opacity: 0.9;
+}
 
         .main-content {
             padding: 40px;
@@ -304,23 +304,23 @@ body {
             100% { transform: rotate(360deg); }
         }
 
-        @media (max-width: 768px) {
-            .container {
-                margin: 10px;
-            }
-            
-            .main-content {
-                padding: 20px;
-            }
-            
-            .controls {
-                flex-direction: column;
-            }
-            
-            .btn {
-                width: 100%;
-            }
-        }
+@media (max-width: 768px) {
+    .container {
+        margin: 10px;
+    }
+    
+    .main-content {
+        padding: 20px;
+    }
+    
+    .controls {
+        flex-direction: column;
+    }
+    
+    .btn {
+        width: 100%;
+    }
+}
 
 /* Estilos do Modal */
 .modal {
@@ -467,3 +467,19 @@ body {
     box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
 }
 
+.file-input {
+    width: 100%;
+    padding: 10px;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    font-size: 16px;
+    font-family: inherit;
+    transition: border-color 0.3s;
+    background-color: #f8f9fa;
+    cursor: pointer;
+}
+
+.file-input:focus {
+    outline: none;
+    border-color: #3498db;
+}
