@@ -13,10 +13,19 @@
         </div>
     </div>
     
+    {# NOVO: Mensagem condicional para texto grande #}
+    {% if processed_text_html == "" and total_words > 0 %} {# Se não há HTML mas há palavras, indica texto grande #}
+    <p class="status-message status-info">Este texto é muito longo para ser exibido na tela. O CSV com os resultados foi gerado para download.</p>
+    {% else %}
     <p class="status-message status-info">Clique nas palavras marcadas no texto para classificá-las ou em "Não é neologismo" na lista abaixo para desmarcá-las.</p>
+    {% endif %}
 
     <div class="processed-text" id="processed-text-display">
+        {# Renderiza o HTML apenas se não for vazio #}
         {{ processed_text_html|safe }}
+        {% if processed_text_html == "" and total_words > 0 %}
+            <p>Conteúdo do texto não exibido devido ao seu tamanho.</p>
+        {% endif %}
     </div>
 
     {% if neologism_candidates %}
@@ -24,7 +33,7 @@
         <h3>Candidatos a Neologismos</h3>
         <div id="neologism-candidate-container">
             {% for candidate in neologism_candidates %}
-            <div class="candidate-item" data-word-lower="{{ candidate.word_lower }}"> {# Adicionado data-word-lower para fácil seleção #}
+            <div class="candidate-item" data-word-lower="{{ candidate.word_lower }}">
                 <div class="candidate-info">
                     <span class="candidate-word">{{ candidate.word }}</span>
                     <span class="candidate-pos">({{ candidate.pos|lower }})</span>
@@ -32,10 +41,11 @@
                 <div class="candidate-actions">
                     <button class="btn btn-small btn-secondary classify-btn" 
                             data-word="{{ candidate.word }}" 
-                            data-original-pos="{{ candidate.original_pos }}" {# POS original do spaCy #}
-                            data-pos="{{ candidate.pos }}" {# POS mapeado para português #}
+                            data-original-pos="{{ candidate.original_pos }}"
+                            data-pos="{{ candidate.pos }}"
                             data-lemma="{{ candidate.lemma }}"
-                            data-sentence-text="{{ candidate.sentence_text }}">Classificar</button>
+                            data-sentence-text="{{ candidate.sentence_text }}"
+                            data-predicted-formation="{{ candidate.predicted_formation }}">Classificar</button> {# Adicionado data-predicted-formation #}
                     <button class="btn btn-small btn-reject validate-btn" data-word="{{ candidate.word }}" data-action="reject_neologism">Não é neologismo</button>
                 </div>
             </div>

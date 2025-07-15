@@ -23,6 +23,12 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 
 DICIO_CACHE_PATH = os.path.join(DATA_DIR, 'dicio_cache.json')
 
+# --- Configurações do spaCy para textos longos ---
+# O limite padrão do spaCy é 1.000.000 caracteres.
+# Para textos maiores, podemos processar em chunks.
+# Definir um chunk_size menor que o max_length padrão ou o aumentado.
+SPACY_CHUNK_SIZE = 900_000 # Um pouco abaixo do limite padrão de 1M para segurança
+
 # --- Mapeamento de Classes Gramaticais (PARA EXIBIÇÃO E FILTRAGEM) ---
 CANDIDATE_POS_TAGS = {"NOUN", "ADJ", "VERB"}
 
@@ -204,6 +210,15 @@ def create_prediction_features(word):
 class NeologismDetector:
     def __init__(self):
         self.nlp = self._load_spacy_model()
+        # Aumentar o max_length do spaCy para acomodar textos ligeiramente maiores,
+        # mas ainda processar em chunks para textos MUITO grandes.
+        try:
+            # Tentar aumentar o limite, se a máquina tiver RAM suficiente.
+            # Este valor pode precisar de ajuste fino.
+            self.nlp.max_length = 2_000_000 # Exemplo: 2 milhões de caracteres
+        except ValueError as e:
+            print(f"Aviso: Não foi possível definir nlp.max_length: {e}. Usando valor padrão.")
+            # Se a máquina for pequena (como PythonAnywhere gratuito), pode falhar
 
     def _load_spacy_model(self):
         """Carrega o modelo spaCy para português."""
@@ -215,149 +230,183 @@ class NeologismDetector:
             return spacy.load("pt_core_news_sm")
     
     def process_text(self, text):
-        doc = self.nlp(text)
-        processed_html_parts = []
-        neologism_candidates = []
+        # Determine se o texto é muito grande para o display HTML
+        IS_LARGE_TEXT_FOR_DISPLAY = len(text) > 50000 # Definir um limite para exibir no HTML
+                                                      # ex: 50.000 caracteres (aprox. 10 páginas)
+
+        # Lógica para processar texto em chunks se for muito longo para o spaCy
+        # Coletar tokens, neologismos e sentenças de todos os chunks
+        all_tokens = []
+        all_neologism_candidates = []
+        all_sentences = []
+        current_token_idx_offset = 0 # Para ajustar os índices de token em chunks subsequentes
+        
+        # Divide o texto em pedaços para processamento pelo spaCy se exceder o limite
+        # O spaCy.make_doc é mais leve, e then `nlp.pipe` é mais eficiente.
+        # Mas para simplificar aqui, vamos usar slicing e nlp() individualmente.
+        
+        # Determine o max_length do modelo spaCy real para comparar.
+        # Se for o default 1M, chunk em 900k
+        # Se for 2M, chunk em 1.9M.
+        effective_spacy_max_length = self.nlp.max_length 
+        
+        if len(text) > effective_spacy_max_length:
+            print(f"Texto muito longo ({len(text)} chars) para processamento spaCy em uma única passada. Processando em chunks de {SPACY_CHUNK_SIZE} chars.")
+            # Quebrar texto em chunks
+            text_chunks = [text[i:i + SPACY_CHUNK_SIZE] for i in range(0, len(text), SPACY_CHUNK_SIZE)]
+        else:
+            text_chunks = [text] # Apenas um chunk se o texto cabe no limite
+
+        # Limpar 'seen_neologism_candidates' para cada novo processamento.
+        seen_neologism_candidates_global = set() # Usar um conjunto global para palavras únicas
+                                                # para não duplicar na lista de candidatos finais.
+        
         total_words = 0
         num_neologisms = 0
-        
-        seen_neologism_candidates = set()
-        
-        sentences = [sent.text for sent in doc.sents]
 
-        for token in doc:
-            # DEBUG: Imprime o token original e suas propriedades iniciais
-            # print(f"\n--- Processando Token: '{token.text}' (Index: {token.idx}) ---")
-            # print(f"  POS: {token.pos_}, Lemma: {token.lemma_}, Ent_Type: {token.ent_type_}")
-
-            if token.is_space:
-                # print(f"  Ignorando: Espaço.")
-                processed_html_parts.append(token.text)
-                continue
-            if token.is_punct or token.like_num:
-                # print(f"  Ignorando: Pontuação ou Número.")
-                processed_html_parts.append(token.text + token.whitespace_)
-                continue
-
-            word_lower = token.text.lower()
-            original_word = token.text
+        # Iterar sobre os chunks
+        for chunk_text in text_chunks:
+            # CUIDADO: Nlp() em chunks pode cortar sentenças no meio.
+            # Uma solução mais avançada é tentar preservar sentenças inteiras nos chunks.
+            # Por simplicidade, vamos apenas processar o chunk.
+            doc = self.nlp(chunk_text)
             
-            clean_word_lower = re.sub(r'^\W+|\W+$', '', word_lower)
-            clean_original_word = re.sub(r'^\W+|\W+$', '', original_word)
-
-            if not clean_word_lower:
-                # print(f"  Ignorando: Vazio após limpeza ('{original_word}').")
-                processed_html_parts.append(original_word + token.whitespace_)
-                continue
-
-            total_words += 1
-            is_neologism_candidate = False
-
-            if token.pos_ == "PROPN" or token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]:
-                # print(f"  Ignorando: Nome Próprio ou Entidade Nomeada ({token.pos_}/{token.ent_type_}).")
-                processed_html_parts.append(original_word + token.whitespace_)
-                continue
-
-            if token.pos_ not in CANDIDATE_POS_TAGS:
-                # print(f"  Ignorando: Classe Gramatical ('{token.pos_}') não é candidata a neologismo.")
-                processed_html_parts.append(original_word + token.whitespace_)
-                continue
-         
-            # 4. Verificar no LÉXICO DO BANCO DE DADOS
-            found_by_word_form_in_lexicon = LexiconWord.objects.filter(word=clean_word_lower).exists()
-            found_by_word_form_in_custom = CustomAddition.objects.filter(word=clean_word_lower).exists()
+            # Reconstituir sentenças completas da maneira mais robusta, se o texto foi chunked
+            # Se for chunked, sentenças podem estar cortadas. Não dá para confiar em doc.sents.
+            # Se IS_LARGE_TEXT_FOR_DISPLAY for True, não vamos exibir, então sentenças para CSV basta
+            # que sejam tokens, mas para contexto de ML, precisamos a sentença original.
+            # A forma mais robusta é ter um sentencizer separado que trabalhe no texto completo.
+            # Por enquanto, vou manter o doc.sents do chunk, e a lógica de sentence_idx funcionará se a sentença
+            # estiver dentro do chunk.
             
-            found_by_lemma_in_lexicon = False
-            found_by_lemma_in_custom = False
-            lemma_to_check = token.lemma_.lower()
+            # Coleta de sentenças do texto completo (antes do chunking) para uso no CSV e modal.
+            # Isto já é feito uma vez no início da função, e `sentences` já é global para todos os chunks
+            # O `_get_sentence_index` vai mapear de volta para o índice na lista `sentences`.
 
-            if ' ' in lemma_to_check:
-                main_lemma_part = lemma_to_check.split(' ')[0]
-                found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=main_lemma_part).exists()
-                found_by_lemma_in_custom = CustomAddition.objects.filter(word=main_lemma_part).exists()
-            else:
-                found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=lemma_to_check).exists()
-                found_by_lemma_in_custom = CustomAddition.objects.filter(word=lemma_to_check).exists()
+            for token in doc:
+                if token.is_space:
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(token.text)
+                    continue
+                if token.is_punct or token.like_num:
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(token.text + token.whitespace_)
+                    continue
 
-            is_word_in_db_lexicon = found_by_word_form_in_lexicon or \
-                                   found_by_word_form_in_custom or \
-                                   found_by_lemma_in_lexicon or \
-                                   found_by_lemma_in_custom
-
-            # print(f"  Verificando léxico (limpo: '{clean_word_lower}', lema: '{token.lemma_}')")
-            # print(f"    Encontrado por forma limpa no léxico: {found_by_word_form_in_lexicon}")
-            # print(f"    Encontrado por forma limpa nas custom: {found_by_word_form_in_custom}")
-            # print(f"    Encontrado por lema no léxico: {found_by_lemma_in_lexicon}")
-            # print(f"    Encontrado por lema nas custom: {found_by_lemma_in_custom}")
-            # print(f"    Total no DB Léxico: {is_word_in_db_lexicon}")
-
-            
-            if not is_word_in_db_lexicon: # Se a palavra (ou seu lema) NÃO está no léxico do DB
-                # 5. Enriquecer o filtro com Dicio.com.br
-                is_in_dicio = is_word_in_dicio(clean_word_lower)
-                # print(f"  Verificando Dicio.com.br para '{clean_word_lower}': {is_in_dicio}")
-
-                if not is_in_dicio:
-                    is_neologism_candidate = True
-                    # print(f"  Marcado como NEOLOGISMO CANDIDATO.")
-                else:
-                    self.add_to_custom_additions(clean_word_lower)
-                    # print(f"  NÃO é neologismo: Encontrado no Dicio. Adicionado a CustomAdditions.")
-            else:
-                # print(f"  NÃO é neologismo: Encontrado no Léxico DB.")
-                pass # Não faça nada aqui, a palavra não é candidata
-
-            if is_neologism_candidate:
-                num_neologisms += 1
+                word_lower = token.text.lower()
+                original_word = token.text
                 
-                # NOVO: Classificação automática via ML
-                predicted_formation = "Não classificado (ML indisponível)"
-                if CLASSIFIER_MODEL and CHAR_VECTORIZER and EXPLICIT_FEATURE_NAMES:
-                    try:
-                        word_explicit_features_dict = create_prediction_features(clean_original_word)
-                        explicit_features_array = np.array([[word_explicit_features_dict.get(name, 0) for name in EXPLICIT_FEATURE_NAMES]])
-                        explicit_features_sparse = csr_matrix(explicit_features_array)
-                        
-                        char_features_single = CHAR_VECTORIZER.transform([clean_original_word])
-                        
-                        X_single_word = hstack([explicit_features_sparse, char_features_single])
-                        
-                        predicted_formation = CLASSIFIER_MODEL.predict(X_single_word)[0]
-                        # print(f"  Classificação ML para '{clean_original_word}': {predicted_formation}")
-                    except Exception as e:
-                        # print(f"  Erro na classificação ML para '{clean_original_word}': {e}")
-                        predicted_formation = "Erro na classificação ML"
+                clean_word_lower = re.sub(r'^\W+|\W+$', '', word_lower)
+                clean_original_word = re.sub(r'^\W+|\W+$', '', original_word)
 
-                processed_html_parts.append(
-                    f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
-                    f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" '
-                    f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
-                    f'data-sentence-text="{html.escape(sentences[self._get_sentence_index(token, doc)])}" '
-                    f'data-predicted-formation="{html.escape(predicted_formation)}">' # NOVO DATA-ATTRIBUTE
-                    f'{html.escape(original_word)}</span>{token.whitespace_}'
-                )
-                if clean_word_lower not in seen_neologism_candidates:
-                    neologism_candidates.append({
-                        'word': clean_original_word,
-                        'word_lower': clean_word_lower,
-                        'original_pos': token.pos_,
-                        'pos': POS_MAPPING.get(token.pos_, token.pos_),
-                        'lemma': token.lemma_,
-                        'sentence_idx': self._get_sentence_index(token, doc),
-                        'sentence_text': sentences[self._get_sentence_index(token, doc)],
-                        'predicted_formation': predicted_formation # NOVO CAMPO NO neologism_candidates
-                    })
-                    seen_neologism_candidates.add(clean_word_lower)
-            else:
-                processed_html_parts.append(original_word + token.whitespace_)
+                if not clean_word_lower:
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(original_word + token.whitespace_)
+                    continue
 
-        # print("\n--- Fim do Processamento do Texto ---")
+                total_words += 1
+                is_neologism_candidate = False
+
+                if token.pos_ == "PROPN" or token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]:
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(original_word + token.whitespace_)
+                    continue
+
+                if token.pos_ not in CANDIDATE_POS_TAGS:
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(original_word + token.whitespace_)
+                    continue
+            
+                # 4. Verificar no LÉXICO DO BANCO DE DADOS
+                found_by_word_form_in_lexicon = LexiconWord.objects.filter(word=clean_word_lower).exists()
+                found_by_word_form_in_custom = CustomAddition.objects.filter(word=clean_word_lower).exists()
+                
+                found_by_lemma_in_lexicon = False
+                found_by_lemma_in_custom = False
+                lemma_to_check = token.lemma_.lower()
+
+                if ' ' in lemma_to_check:
+                    main_lemma_part = lemma_to_check.split(' ')[0]
+                    found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=main_lemma_part).exists()
+                    found_by_lemma_in_custom = CustomAddition.objects.filter(word=main_lemma_part).exists()
+                else:
+                    found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=lemma_to_check).exists()
+                    found_by_lemma_in_custom = CustomAddition.objects.filter(word=lemma_to_check).exists()
+
+                is_word_in_db_lexicon = found_by_word_form_in_lexicon or \
+                                       found_by_word_form_in_custom or \
+                                       found_by_lemma_in_lexicon or \
+                                       found_by_lemma_in_custom
+                
+                if not is_word_in_db_lexicon:
+                    is_in_dicio = is_word_in_dicio(clean_word_lower)
+
+                    if not is_in_dicio:
+                        is_neologism_candidate = True
+                    else:
+                        self.add_to_custom_additions(clean_word_lower)
+                else:
+                    pass
+
+                if is_neologism_candidate:
+                    num_neologisms += 1
+                    
+                    predicted_formation = "Não classificado (ML indisponível)"
+                    if CLASSIFIER_MODEL and CHAR_VECTORIZER and EXPLICIT_FEATURE_NAMES:
+                        try:
+                            word_explicit_features_dict = create_prediction_features(clean_original_word)
+                            explicit_features_array = np.array([[word_explicit_features_dict.get(name, 0) for name in EXPLICIT_FEATURE_NAMES]])
+                            explicit_features_sparse = csr_matrix(explicit_features_array)
+                            
+                            char_features_single = CHAR_VECTORIZER.transform([clean_original_word])
+                            
+                            X_single_word = hstack([explicit_features_sparse, char_features_single])
+                            
+                            predicted_formation = CLASSIFIER_MODEL.predict(X_single_word)[0]
+                        except Exception as e:
+                            print(f"  Erro na classificação ML para '{clean_original_word}': {e}")
+                            predicted_formation = "Erro na classificação ML"
+
+                    # Adiciona a marcação HTML apenas se o texto não for grande para display
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(
+                            f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
+                            f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" '
+                            f'data-sent-idx="{self._get_sentence_index(token, doc)}" '
+                            f'data-sentence-text="{html.escape(sentences[self._get_sentence_index(token, doc)])}" '
+                            f'data-predicted-formation="{html.escape(predicted_formation)}">'
+                            f'{html.escape(original_word)}</span>{token.whitespace_}'
+                        )
+                    else:
+                        # Se não vai para display, adiciona a palavra pura com seu espaço
+                        processed_html_parts.append(original_word + token.whitespace_)
+
+                    if clean_word_lower not in seen_neologism_candidates_global: # Usar conjunto global
+                        all_neologism_candidates.append({ # Adiciona à lista global
+                            'word': clean_original_word,
+                            'word_lower': clean_word_lower,
+                            'original_pos': token.pos_,
+                            'pos': POS_MAPPING.get(token.pos_, token.pos_),
+                            'lemma': token.lemma_,
+                            'sentence_idx': self._get_sentence_index(token, doc),
+                            'sentence_text': sentences[self._get_sentence_index(token, doc)],
+                            'predicted_formation': predicted_formation
+                        })
+                        seen_neologism_candidates_global.add(clean_word_lower) # Adiciona ao conjunto global
+                else:
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(original_word + token.whitespace_)
+                    else:
+                        processed_html_parts.append(original_word + token.whitespace_) # Palavras não neologismos também precisam do seu espaço
+
+        # Retorno final para a view
         return {
-            'processed_text_html': "".join(processed_html_parts),
-            'neologism_candidates': neologism_candidates,
+            'processed_text_html': "".join(processed_html_parts) if not IS_LARGE_TEXT_FOR_DISPLAY else "", # Retorna vazio se texto for grande
+            'neologism_candidates': all_neologism_candidates, # Usa a lista global
             'total_words': total_words,
             'num_neologisms': num_neologisms,
-            'sentences': sentences
+            'sentences': sentences, # A lista completa de sentenças
+            'is_large_text_for_display': IS_LARGE_TEXT_FOR_DISPLAY # Informa à view que o texto era grande
         }
 
     def _get_sentence_index(self, token, doc):

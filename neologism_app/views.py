@@ -14,41 +14,31 @@ from .services import detector, DICIO_CACHE_PATH, POS_MAPPING, FORMATION_PROCESS
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024 # 5 MB
 
 def index(request):
-    """View para a página inicial com o formulário de entrada de texto ou upload de arquivo."""
     if request.method == 'POST':
         text = None
-        
-        # 1. Tenta pegar o texto do textarea
         text_input_from_form = request.POST.get('text_input', '').strip()
-        
-        # 2. Tenta pegar o arquivo de upload
         uploaded_file = request.FILES.get('file_upload')
 
         if text_input_from_form:
             text = text_input_from_form
             source_type = "textarea"
         elif uploaded_file:
-            # Verifica o tamanho do arquivo
             if uploaded_file.size > MAX_UPLOAD_SIZE:
                 messages.error(request, f"O arquivo '{uploaded_file.name}' é muito grande. O tamanho máximo permitido é {MAX_UPLOAD_SIZE / (1024 * 1024):.1f} MB.")
                 return render(request, 'neologism_app/index.html')
             
-            # Verifica o tipo de arquivo (opcional, mas recomendado)
             if not uploaded_file.name.lower().endswith('.txt'):
                 messages.error(request, f"Tipo de arquivo não suportado para '{uploaded_file.name}'. Por favor, envie apenas arquivos TXT.")
                 return render(request, 'neologism_app/index.html')
 
             try:
-                # Lendo o conteúdo do arquivo
-                # uploaded_file.read() retorna bytes, precisamos decodificá-los para string
-                # Tentar UTF-8 primeiro, fallback para latin-1
                 file_content_bytes = uploaded_file.read()
                 try:
                     text = file_content_bytes.decode('utf-8')
-                    source_type = "file_upload (UTF-8)"
+                    source_type = f"arquivo '{uploaded_file.name}' (UTF-8)"
                 except UnicodeDecodeError:
-                    text = file_content_bytes.decode('latin-1') # Tenta latin-1 como fallback
-                    source_type = "file_upload (Latin-1)"
+                    text = file_content_bytes.decode('latin-1')
+                    source_type = f"arquivo '{uploaded_file.name}' (Latin-1)"
                 
             except Exception as e:
                 messages.error(request, f"Erro ao ler o arquivo '{uploaded_file.name}': {e}")
@@ -58,17 +48,37 @@ def index(request):
             messages.error(request, "Por favor, insira um texto ou faça o upload de um arquivo TXT para análise.")
             return render(request, 'neologism_app/index.html')
 
-        # Armazena o texto na sessão para reuso se o usuário voltar à página
-        request.session['text_to_process'] = text
-
         # Processa o texto usando o detector
         results = detector.process_text(text)
         
-        # Armazena os resultados na sessão para serem acessados pela página de resultados
-        request.session['detection_results'] = results
+        # NOVO: Lógica para textos grandes
+        if results.get('is_large_text_for_display'):
+            # Para textos grandes, não salvamos na sessão para display, apenas exportamos o CSV
+            # O `export_csv` já pega o `detection_results` da sessão. Então vamos colocá-lo lá temporariamente.
+            request.session['detection_results'] = results
+            
+            # Gerar o nome do arquivo CSV
+            csv_filename = f"neologismos_{uploaded_file.name.replace('.txt', '') if uploaded_file else 'analise'}.csv"
 
-        messages.success(request, f"Texto processado com sucesso! Fonte: {source_type}")
-        return redirect('neologism_app:results')
+            # Chamar a função de exportação do service
+            csv_filepath = detector.export_results_to_csv(results, filename=csv_filename) # Passa 'results' diretamente
+
+            if csv_filepath and os.path.exists(csv_filepath):
+                messages.success(request, f"O texto é muito longo para exibição. Um arquivo CSV ('{os.path.basename(csv_filepath)}') foi gerado e será baixado automaticamente.")
+                with open(csv_filepath, 'rb') as f:
+                    response = HttpResponse(f.read(), content_type='text/csv')
+                    response['Content-Disposition'] = f'attachment; filename="{os.path.basename(csv_filepath)}"'
+                    return response # Retorna o arquivo CSV diretamente para download
+            else:
+                messages.error(request, "Erro ao gerar o arquivo CSV para texto longo.")
+                return redirect('neologism_app:index') # Redireciona para o início com erro
+
+        else:
+            # Para textos menores, salva na sessão e redireciona para a página de resultados normal
+            request.session['text_to_process'] = text # O texto original, para reuso
+            request.session['detection_results'] = results
+            messages.success(request, f"Texto processado com sucesso! Fonte: {source_type}")
+            return redirect('neologism_app:results')
 
     return render(request, 'neologism_app/index.html')
 
@@ -146,22 +156,17 @@ def validate_neologism(request):
     return JsonResponse({'status': 'error', 'message': 'Método não permitido.'}, status=405)
 
 def export_csv(request):
-    """
-    Exporta os resultados da última detecção para um arquivo CSV (Feature 6).
-    """
     detection_results = request.session.get('detection_results', None)
-    
-    # Verifica se há neologismos detectados, não apenas se a chave existe
     if not detection_results or not detection_results.get('neologism_candidates'):
-        messages.error(request, "Nenhum neologismo detectado para exportar para CSV.")
+        messages.error(request, "Nenhum neologismo detectado para exportar.")
         return redirect('neologism_app:results')
 
+    # Para textos menores, o CSV ainda será gerado pelo link na página de resultados.
+    # O `detector.export_results_to_csv` já está adaptado para receber `results`.
     csv_filepath = detector.export_results_to_csv(detection_results)
 
     if csv_filepath and os.path.exists(csv_filepath):
-        # A mensagem será exibida apenas se o usuário navegar de volta ou a página for recarregada
         messages.success(request, f"Arquivo CSV '{os.path.basename(csv_filepath)}' gerado com sucesso!")
-        
         with open(csv_filepath, 'rb') as f:
             response = HttpResponse(f.read(), content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="{os.path.basename(csv_filepath)}"'

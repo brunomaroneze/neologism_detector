@@ -18,6 +18,7 @@
     const modalSentenceContext = document.getElementById('modal-sentence-context');
     const modalSaveButton = document.getElementById('modal-save-button');
     const modalRejectButton = modal.querySelector('.modal-reject-btn');
+    const modalPredictedFormation = document.getElementById('modal-predicted-formation'); // NOVO ELEMENTO
 
     // Obter CSRF token do meta tag
     const csrftoken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
@@ -111,6 +112,7 @@
             const pos = this.dataset.pos;
             const lemma = this.dataset.lemma;
             const sentenceText = this.dataset.sentenceText;
+            const predictedFormation = this.dataset.predictedFormation; // <--- NOVO: Pegar a predição
             
             openModal(word, originalPos, pos, lemma, sentenceText);
         });
@@ -125,7 +127,8 @@
             const pos = target.dataset.pos;
             const lemma = target.dataset.lemma;
             const sentenceIdx = target.dataset.sentIdx;
-            
+            // const sentenceText = target.dataset.sentenceText || ''; 
+            const predictedFormation = target.dataset.predictedFormation; // <--- NOVO: Pegar a predição
             // Precisa do texto da sentença. Poderíamos passar no data-attribute do span.
             // Ou buscar do array 'sentences' guardado na sessão, se for passado ao JS.
             // Por simplicidade, faremos um fetch ou guardaremos um mapa.
@@ -150,7 +153,7 @@
             // Por enquanto, se o `neologism` span não tiver `data-sentence-text`, será vazio.
             const sentenceText = target.dataset.sentenceText || ''; 
             
-            openModal(word, originalPos, pos, lemma, sentenceText);
+            openModal(word, originalPos, pos, lemma, sentenceText, predictedFormation);
         }
     });
 
@@ -202,11 +205,14 @@
         modalLemmaInput.value = lemma;
         modalSentenceContext.textContent = sentenceText;
 
+        modalPredictedFormation.textContent = predictedFormation || 'N/A'; // Exibe a predição ML
+        // Pre-selecionar o select do processo de formação com a sugestão ML
+        modalFormationProcess.value = predictedFormation || ''; // Pré-seleciona, se houver. Senão, fica vazio.
+
         // Pre-selecionar a classe gramatical sugerida se for uma das opções do select
         const mappedOriginalPos = POS_MAPPING[originalPos] || 'Outros'; // Use o mapa JS para consistency
         modalCorrectedPos.value = mappedOriginalPos;
-        modalFormationProcess.value = ''; // Resetar o campo de formação
-
+        
         modal.style.display = 'flex'; // Exibe o modal
     }
 
