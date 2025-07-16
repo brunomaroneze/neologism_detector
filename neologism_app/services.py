@@ -24,8 +24,7 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 DICIO_CACHE_PATH = os.path.join(DATA_DIR, 'dicio_cache.json')
 
 # --- Configurações do spaCy para textos longos ---
-# REDUZIR CHUNK_SIZE AINDA MAIS! Tentar 100_000 ou 50_000.
-SPACY_CHUNK_SIZE = 50_000 # <-- Reduzido novamente. Tentar 50_000 se ainda der erro.
+SPACY_CHUNK_SIZE = 50_000 # <-- Mantido em 50k, ajuste se ainda tiver MemoryError
 SPACY_MAX_LENGTH_NORMAL = 1_000_000 
 SPACY_MAX_LENGTH_LARGE_TEXT_PROCESSING = 2_000_000 
 
@@ -150,7 +149,7 @@ FORMATION_PROCESS_OPTIONS = [
     "outros" 
 ]
 
-# --- Carregar Modelos de ML e Ferramentas (NOVO BLOCO DE CÓDIGO) ---
+# --- Carregar Modelos de ML e Ferramentas (EXISTENTE) ---
 CLASSIFIER_MODEL = None
 CHAR_VECTORIZER = None
 EXPLICIT_FEATURE_NAMES = []
@@ -174,8 +173,45 @@ except FileNotFoundError as e:
 except Exception as e:
     print(f"Erro ao carregar modelos de classificação de neologismos: {e}. A classificação automática não estará disponível.")
 
+# --- Função Auxiliar para Lidar com Pronomes Enclíticos (EXISTENTE) ---
+def normalize_enclitic_pronoun_word(word_form, lemma_from_spacy):
+    """
+    Normaliza a forma da palavra e/ou o lema do spaCy para lidar com pronomes enclíticos.
+    Retorna uma lista de palavras a serem verificadas no léxico.
+    """
+    word_form_lower = word_form.lower()
+    lemma_lower = lemma_from_spacy.lower() if lemma_from_spacy else ''
+    
+    candidates_for_lexicon_check = []
 
-# --- Função de Engenharia de Features para Predição (NOVO) ---
+    pattern1_endings = ['-o', '-a', '-os', '-as', '-no', '-na', '-nos', '-nas', '-se', '-lhe', '-lhes']
+    
+    if ' ' in lemma_lower:
+        candidates_for_lexicon_check.append(lemma_lower.split(' ')[0]) 
+
+    candidates_for_lexicon_check.append(lemma_lower)
+    candidates_for_lexicon_check.append(word_form_lower)
+
+    if word_form_lower.endswith(('á-lo', 'á-la', 'á-los', 'á-las')):
+        candidates_for_lexicon_check.append(word_form_lower.replace(word_form_lower[-4:], 'ar')) 
+    elif word_form_lower.endswith(('ê-lo', 'ê-la', 'ê-los', 'ê-las')):
+        candidates_for_lexicon_check.append(word_form_lower.replace(word_form_lower[-4:], 'er')) 
+    elif word_form_lower.endswith(('i-lo', 'i-la', 'i-los', 'i-las')):
+        candidates_for_lexicon_check.append(word_form_lower.replace(word_form_lower[-4:], 'ir')) 
+    elif word_form_lower.endswith(('ô-lo', 'ô-la', 'ô-los', 'ô-las')):
+        candidates_for_lexicon_check.append(word_form_lower.replace(word_form_lower[-4:], 'or')) 
+    
+    for ending in pattern1_endings:
+        if word_form_lower.endswith(ending):
+            part_before_hyphen = word_form_lower.rsplit('-', 1)[0] 
+            if part_before_hyphen: 
+                candidates_for_lexicon_check.append(part_before_hyphen)
+                if part_before_hyphen.endswith('r'):
+                    candidates_for_lexicon_check.append(part_before_hyphen[:-1])
+    
+    return list(set(candidates_for_lexicon_check))
+
+# --- Função de Engenharia de Features para Predição (EXISTENTE) ---
 def create_prediction_features(word):
     features = {}
     word_normalized = unicodedata.normalize('NFKD', word.lower()).encode('ascii', 'ignore').decode('utf-8')
@@ -250,7 +286,7 @@ class NeologismDetector:
         use_full_ner_filter = (nlp_instance_to_use == self.nlp) 
 
         temp_doc_for_sents = None
-        sentences = [] # Inicializa como lista vazia, será populada se o spaCy funcionar
+        sentences = [] 
 
         try:
             temp_doc_for_sents = nlp_instance_to_use(text) 
@@ -264,7 +300,6 @@ class NeologismDetector:
         total_words = 0
         num_neologisms = 0
         
-        # Inicia processed_html_parts aqui
         processed_html_parts = []
 
         text_chunks = [text[i:i + SPACY_CHUNK_SIZE] for i in range(0, len(text), SPACY_CHUNK_SIZE)]
@@ -292,8 +327,12 @@ class NeologismDetector:
                 word_lower = token.text.lower()
                 original_word = token.text
                 
-                clean_word_lower = re.sub(r'^\W+|\W+$', '', word_lower)
-                clean_original_word = re.sub(r'^\W+|\W+$', '', original_word)
+                # === LIMPEZA MAIS RIGOROSA DE CARACTERES NÃO-ALFABÉTICOS E HÍFENS ===
+                clean_word_lower = re.sub(r'[^a-záàâãéêíóôõúüç\-]', '', word_lower)
+                clean_original_word = re.sub(r'[^a-záàâãéêíóôõúüç\-]', '', original_word)
+            
+                clean_word_lower = re.sub(r'-{2,}', '-', clean_word_lower).strip('-')
+                clean_original_word = re.sub(r'-{2,}', '-', clean_original_word).strip('-')
 
                 if not clean_word_lower:
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
@@ -315,26 +354,21 @@ class NeologismDetector:
                         processed_html_parts.append(original_word + token.whitespace_)
                     continue
             
-                # 4. Verificar no LÉXICO DO BANCO DE DADOS
-                found_by_word_form_in_lexicon = LexiconWord.objects.filter(word=clean_word_lower).exists()
-                found_by_word_form_in_custom = CustomAddition.objects.filter(word=clean_word_lower).exists()
+                # 4. === VERIFICAR NO LÉXICO DO BANCO DE DADOS (NOVA LÓGICA DE PRONOMES OBLÍQUOS INSERIDA AQUI) ===
+                words_to_check_in_lexicon = normalize_enclitic_pronoun_word(clean_word_lower, token.lemma_)
                 
-                found_by_lemma_in_lexicon = False
-                found_by_lemma_in_custom = False
-                lemma_to_check = token.lemma_.lower()
+                is_word_in_db_lexicon = False
+                for check_word in words_to_check_in_lexicon:
+                    if LexiconWord.objects.filter(word=check_word).exists():
+                        is_word_in_db_lexicon = True
+                        break
+                    if CustomAddition.objects.filter(word=check_word).exists():
+                        is_word_in_db_lexicon = True
+                        break
+                # FIM DA LÓGICA DE PRONOMES OBLÍQUOS
 
-                if ' ' in lemma_to_check:
-                    main_lemma_part = lemma_to_check.split(' ')[0]
-                    found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=main_lemma_part).exists()
-                    found_by_lemma_in_custom = CustomAddition.objects.filter(word=main_lemma_part).exists()
-                else:
-                    found_by_lemma_in_lexicon = LexiconWord.objects.filter(word=lemma_to_check).exists()
-                    found_by_lemma_in_custom = CustomAddition.objects.filter(word=lemma_to_check).exists()
-
-                is_word_in_db_lexicon = found_by_word_form_in_lexicon or \
-                                       found_by_word_form_in_custom or \
-                                       found_by_lemma_in_lexicon or \
-                                       found_by_lemma_in_custom
+                # print(f"  Verificando léxico (limpo: '{clean_word_lower}', lema: '{token.lemma_}')")
+                # print(f"    Total no DB Léxico: {is_word_in_db_lexicon}") # DEBUG: Remova ou comente esta linha após teste
                 
                 if not is_word_in_db_lexicon:
                     is_in_dicio = is_word_in_dicio(clean_word_lower)
@@ -347,14 +381,11 @@ class NeologismDetector:
                     pass
 
                 # Obter índice da sentença e texto para o token atual
-                # CORREÇÃO CRÍTICA AQUI: A função _get_sentence_index_from_full_text
-                # DEVE ser chamada com o *offset de caractere no texto completo* e o *documento spaCy completo de sentenças*.
-                # O token.idx é relativo ao chunk, então precisamos ajustar.
-                original_token_start_char = token.idx + (chunk_idx * SPACY_CHUNK_SIZE) # <-- Correto para o offset
+                original_token_start_char = token.idx + (chunk_idx * SPACY_CHUNK_SIZE)
                 
-                sentence_idx_for_token = self._get_sentence_index_from_full_text(original_token_start_char, temp_doc_for_sents) # <-- Usar temp_doc_for_sents
+                sentence_idx_for_token = self._get_sentence_index_from_full_text(original_token_start_char, temp_doc_for_sents)
                 
-                sentence_text_for_token = sentences[sentence_idx_for_token] if (sentence_idx_for_token != -1 and sentences and sentence_idx_for_token < len(sentences)) else "Sentença não encontrada" # <-- Checagem de bounds
+                sentence_text_for_token = sentences[sentence_idx_for_token] if (sentence_idx_for_token != -1 and sentences and sentence_idx_for_token < len(sentences)) else "Sentença não encontrada"
 
                 if is_neologism_candidate:
                     num_neologisms += 1
@@ -379,8 +410,8 @@ class NeologismDetector:
                         processed_html_parts.append(
                             f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
                             f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" '
-                            f'data-sent-idx="{sentence_idx_for_token}" ' # <-- Usar a variável corrigida
-                            f'data-sentence-text="{html.escape(sentence_text_for_token)}" ' # <-- Usar a variável corrigida
+                            f'data-sent-idx="{sentence_idx_for_token}" '
+                            f'data-sentence-text="{html.escape(sentence_text_for_token)}" '
                             f'data-predicted-formation="{html.escape(predicted_formation)}">'
                             f'{html.escape(original_word)}</span>{token.whitespace_}'
                         )
@@ -394,8 +425,8 @@ class NeologismDetector:
                             'original_pos': token.pos_,
                             'pos': POS_MAPPING.get(token.pos_, token.pos_),
                             'lemma': token.lemma_,
-                            'sentence_idx': sentence_idx_for_token, # <-- Usar a variável corrigida
-                            'sentence_text': sentence_text_for_token, # <-- Usar a variável corrigida
+                            'sentence_idx': sentence_idx_for_token, 
+                            'sentence_text': sentence_text_for_token, 
                             'predicted_formation': predicted_formation
                         })
                         seen_neologism_candidates_global.add(clean_word_lower) 
@@ -410,7 +441,7 @@ class NeologismDetector:
             'neologism_candidates': all_neologism_candidates, 
             'total_words': total_words,
             'num_neologisms': num_neologisms,
-            'sentences': sentences, # A lista completa de sentenças
+            'sentences': sentences, 
             'is_large_text_for_display': IS_LARGE_TEXT_FOR_DISPLAY 
         }
 
@@ -421,19 +452,15 @@ class NeologismDetector:
         """
         if not full_doc_for_sents:
             return -1
-        # Itens em full_doc_for_sents.sents podem não ser listados aqui
-        # Se full_doc_for_sents.sents não for uma lista, ou se sent.start_char for None
-        # Para ser mais robusto, garantir que sent.start_char e sent.end_char existam
         for i, sent in enumerate(full_doc_for_sents.sents):
             if hasattr(sent, 'start_char') and hasattr(sent, 'end_char') and \
                sent.start_char is not None and sent.end_char is not None:
                 if char_offset_in_full_text >= sent.start_char and char_offset_in_full_text < sent.end_char:
                     return i
-        return -1
+        return -1 
 
-    # Funções de adição/validação (AGORA INTERAGEM COM OS MODELOS DB)
+    # Funções de adição/validação (código existente)
     def add_to_custom_additions(self, word):
-        """Adiciona uma palavra à tabela CustomAddition (não neologismos)."""
         word_lower = word.lower()
         try:
             _, created = CustomAddition.objects.get_or_create(word=word_lower)
@@ -443,7 +470,6 @@ class NeologismDetector:
             print(f"Erro ao adicionar '{word_lower}' a CustomAddition: {e}")
             return False
 
-    # Ajustar add_to_neologisms_validated para receber a predição como default
     def add_to_neologisms_validated(self, word, original_pos_tag=None, corrected_pos_tag=None, lemma=None, formation_process=None, predicted_formation=None):
         word_lower = word.lower()
         try:
@@ -452,7 +478,7 @@ class NeologismDetector:
                 defaults={
                     'pos_tag': corrected_pos_tag or POS_MAPPING.get(original_pos_tag, original_pos_tag),
                     'lemma': lemma,
-                    'formation_process': formation_process or predicted_formation # Usa a do usuário, senão a predita
+                    'formation_process': formation_process or predicted_formation 
                 }
             )
             if not created:
@@ -460,7 +486,7 @@ class NeologismDetector:
                 elif original_pos_tag: neologism.pos_tag = POS_MAPPING.get(original_pos_tag, original_pos_tag)
                 if lemma: neologism.lemma = lemma
                 if formation_process: neologism.formation_process = formation_process
-                elif predicted_formation and not neologism.formation_process: # Atualiza com predição se não houver já uma definição
+                elif predicted_formation and not neologism.formation_process: 
                     neologism.formation_process = predicted_formation
                 neologism.save()
             
@@ -471,7 +497,7 @@ class NeologismDetector:
             print(f"Erro ao adicionar/atualizar '{word_lower}' em NeologismValidated: {e}")
             return False
 
-    # Ajustar export_results_to_csv para usar a predição ML
+    # Exportar resultados para CSV (código existente)
     def export_results_to_csv(self, results, filename="neologisms.csv"):
         import csv
         filepath = os.path.join(DATA_DIR, filename)
@@ -481,18 +507,17 @@ class NeologismDetector:
         def get_formation_process_for_csv(word_lower, original_pos_tag, predicted_formation_from_detection=None):
             validated_neo = NeologismValidated.objects.filter(word=word_lower).first()
             if validated_neo and validated_neo.formation_process:
-                return validated_neo.formation_process # Prioriza a do usuário no DB
+                return validated_neo.formation_process 
             
-            if predicted_formation_from_detection: # Usa a predição da detecção
+            if predicted_formation_from_detection: 
                 return predicted_formation_from_detection
             
-            # Heurística simples como fallback (se ML indisponível ou falhou)
             if original_pos_tag:
                  if word_lower.endswith("mente") and original_pos_tag == "ADJ": return "Derivação sufixal (Heurística)"
                  if word_lower.startswith("des") and original_pos_tag == "VERB": return "Derivação prefixal (Heurística)"
                  if re.match(r'^[a-zA-Z]+[_-][a-zA-Z]+$', word_lower): return "Composição (Heurística)"
                  if any(char in 'kqwy' for char in word_lower) and len(word_lower) > 3: return "Estrangeirismo (Heurística)?"
-            return "Outros (Heurística)" # Ajuste para "Outros"
+            return "Outros (Heurística)" 
 
         fieldnames = ['neologismo', 'lema', 'classe_gramatical', 'processo_formacao', 'sentenca']
         
@@ -505,7 +530,7 @@ class NeologismDetector:
                     'original_pos': candidate['original_pos'],
                     'lemma': candidate['lemma'],
                     'sentences_idx': [candidate['sentence_idx']],
-                    'predicted_formation': candidate.get('predicted_formation') # Recupera a predição
+                    'predicted_formation': candidate.get('predicted_formation') 
                 }
             else:
                 if candidate['sentence_idx'] not in unique_candidates[word_lower]['sentences_idx']:
@@ -516,7 +541,7 @@ class NeologismDetector:
             original_word = details['word']
             original_pos_tag_spacy = details['original_pos']
             original_lemma_spacy = details['lemma']
-            predicted_formation_from_detection = details.get('predicted_formation') # Passa a predição
+            predicted_formation_from_detection = details.get('predicted_formation') 
 
 
             validated_neo = NeologismValidated.objects.filter(word=word_lower).first()
