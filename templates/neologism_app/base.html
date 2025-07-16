@@ -17,7 +17,7 @@
         <div class="header">
             <h1>🔍 Detector de Neologismos</h1>
             <p>Ferramenta para identificação automática de neologismos em textos</p>
-            <p>AINDA EM FASE DE TESTES</p> <!-- NOVO: Mensagem de aviso sobre a fase de testes -->
+            <p>AINDA EM FASE DE TESTES</p>
         </div>
 
         <div class="main-content">
@@ -37,7 +37,7 @@
         </div>
     </div>
 
-    <!-- Estrutura do Modal (NOVO) -->
+    <!-- Estrutura do Modal -->
     <div id="neologismModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -45,48 +45,72 @@
                 <span class="close-button">×</span>
             </div>
             <div class="modal-body">
-                <label for="modal-word">Palavra:</label>
-                <span id="modal-word"></span>
+                <div class="modal-field">
+                    <label for="modal-word">Palavra:</label>
+                    <span id="modal-word"></span>
+                </div>
 
-                <label for="modal-original-pos">Classe Gramatical (sugerida):</label>
-                <span id="modal-original-pos"></span>
+                <div class="modal-field">
+                    <label for="modal-original-pos">Classe Gramatical (sugerida):</label>
+                    <span id="modal-original-pos"></span>
+                </div>
                 
-                <label for="modal-lemma-input">Lema (corrigido, se necessário):</label>
-                <input type="text" id="modal-lemma-input"></span>
+                <div class="modal-field">
+                    {# CORREÇÃO AQUI: ID e tipo do elemento para o lema #}
+                    <label for="modal-lemma-input">Lema (corrigido, se necessário):</label>
+                    <input type="text" id="modal-lemma-input"> {# DEVE SER INPUT, NÃO SPAN, E ID CORRETO #}
+                </div>
 
-                <label for="modal-corrected-pos">Classe Gramatical (correta):</label>
-                <select id="modal-corrected-pos">
-                    <option value="">Selecione a classe</option>
-                    <option value="Substantivo">Substantivo</option>
-                    <option value="Adjetivo">Adjetivo</option>
-                    <option value="Verbo">Verbo</option>
-                    <option value="Outros">Outros (não substantivo/adjetivo/verbo)</option>
-                </select>
+                <div class="modal-field">
+                    <label for="modal-corrected-pos">Classe Gramatical (correta):</label>
+                    <select id="modal-corrected-pos">
+                        <option value="">Selecione a classe</option>
+                        <option value="Substantivo">Substantivo</option>
+                        <option value="Adjetivo">Adjetivo</option>
+                        <option value="Verbo">Verbo</option>
+                        <option value="Outros">Outros (não substantivo/adjetivo/verbo)</option>
+                    </select>
+                </div>
 
-                <label for="modal-formation-process">Processo de Formação:</label>
-                <select id="modal-formation-process">
-    <option value="">Selecione o processo</option>
-                    <option value="composto neoclássico">Composto neoclássico</option>
-                    <option value="derivado prefixal">Derivado prefixal</option>
-                    <option value="estrangeirismo">Estrangeirismo</option>
-                    <option value="derivado sufixal">Derivação sufixal</option>
-                    <option value="splinter">Splinter</option>
-                    <option value="composto">Composto</option>
-                    <option value="sigla">Sigla</option>
-                    <option value="outros">Outros</option>
-                </select>
+                {# NOVO CAMPO PARA PREDIÇÃO ML #}
+                <div class="modal-field">
+                    <label for="modal-predicted-formation">Processo de Formação (sugerido por ML):</label>
+                    <span id="modal-predicted-formation"></span>
+                </div>
 
-                <label for="modal-sentence-context">Sentença:</label>
-                <span id="modal-sentence-context"></span>
+                <div class="modal-field">
+                    <label for="modal-formation-process">Processo de Formação (correto):</label>
+                    <select id="modal-formation-process">
+                        <option value="">Selecione o processo</option>
+                        <option value="composto neoclássico">Composto neoclássico</option>
+                        <option value="derivado prefixal">Derivado prefixal</option>
+                        <option value="estrangeirismo">Estrangeirismo</option>
+                        <option value="derivado sufixal">Derivação sufixal</option>
+                        <option value="splinter">Splinter</option>
+                        <option value="composto">Composto</option>
+                        <option value="sigla">Sigla</option>
+                        <option value="outros">Outros</option>
+                    </select>
+                </div>
+
+                <div class="modal-field">
+                    <label for="modal-sentence-context">Sentença:</label>
+                    <span id="modal-sentence-context"></span>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-cancel close-button">Cancelar</button>
-                <button class="btn btn-reject modal-reject-btn">Não é neologismo</button> <!-- Botão para rejeitar via modal -->
+                <button class="btn btn-reject modal-reject-btn">Não é neologismo</button>
                 <button class="btn btn-save" id="modal-save-button">Salvar Classificação</button>
             </div>
         </div>
     </div>
 
-    {% block extra_js %}{% endblock %}
+    {# CORREÇÃO: Mover a inclusão de base_scripts.js para dentro de block extra_js #}
+    {# Se base_scripts.js contiver código global que PRECISA ser carregado antes, mantenha fora #}
+    {# Mas para este setup, é mais comum que `extra_js` seja a única forma de incluir JS #}
+    {% block extra_js %}
+    {# <script src="{% static 'neologism_app/js/base_scripts.js' %}"></script> #}
+    {% endblock %}
 </body>
 </html>

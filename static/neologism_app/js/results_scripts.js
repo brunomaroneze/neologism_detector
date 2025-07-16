@@ -114,7 +114,7 @@
             const sentenceText = this.dataset.sentenceText;
             const predictedFormation = this.dataset.predictedFormation; // <--- NOVO: Pegar a predição
             
-            openModal(word, originalPos, pos, lemma, sentenceText);
+            openModal(word, originalPos, pos, lemma, sentenceText, predictedFormation);
         });
     });
 
@@ -127,7 +127,7 @@
             const pos = target.dataset.pos;
             const lemma = target.dataset.lemma;
             const sentenceIdx = target.dataset.sentIdx;
-            // const sentenceText = target.dataset.sentenceText || ''; 
+            const sentenceText = target.dataset.sentenceText || ''; 
             const predictedFormation = target.dataset.predictedFormation; // <--- NOVO: Pegar a predição
             // Precisa do texto da sentença. Poderíamos passar no data-attribute do span.
             // Ou buscar do array 'sentences' guardado na sessão, se for passado ao JS.
@@ -151,7 +151,7 @@
             // Vou adicionar ao data-attribute do span também para facilitar.
 
             // Por enquanto, se o `neologism` span não tiver `data-sentence-text`, será vazio.
-            const sentenceText = target.dataset.sentenceText || ''; 
+            // const sentenceText = target.dataset.sentenceText || ''; 
             
             openModal(word, originalPos, pos, lemma, sentenceText, predictedFormation);
         }
@@ -198,7 +198,7 @@
     });
 
     // --- Funções do Modal ---
-    function openModal(word, originalPos, pos, lemma, sentenceText) {
+    function openModal(word, originalPos, pos, lemma, sentenceText, predictedFormation) {
         modalWord.textContent = word;
         modalOriginalPos.textContent = pos; // Exibe o POS mapeado (Substantivo, Adjetivo, Verbo)
         modalOriginalPos.dataset.originalPos = originalPos; // Guarda o POS original do spaCy

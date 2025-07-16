@@ -175,79 +175,49 @@ except Exception as e:
 
 # --- Função Auxiliar para Lidar com Pronomes Enclíticos (EXISTENTE) ---
 def normalize_enclitic_pronoun_word(word_form, lemma_from_spacy):
+    """
+    Normaliza a forma da palavra e/ou o lema do spaCy para lidar com pronomes enclíticos.
+    Retorna uma lista de palavras a serem verificadas no léxico.
+    """
     word_form_lower = word_form.lower()
     lemma_lower = lemma_from_spacy.lower() if lemma_from_spacy else ''
     
     candidates_for_lexicon_check = []
 
-    # Sempre incluir a forma limpa original e o lema do spaCy
     candidates_for_lexicon_check.append(word_form_lower)
     candidates_for_lexicon_check.append(lemma_lower)
     
-    # Se o lema do spaCy é composto (ex: "amar ele"), adiciona a primeira parte
     if ' ' in lemma_lower:
         candidates_for_lexicon_check.append(lemma_lower.split(' ')[0])
 
-    # Lógica para substituir terminações de infinitivos com pronomes
-    # Ex: amá-lo, vendê-la, descobri-los, compô-las
-    # Usar regex para identificar o radical e garantir a terminação correta
-    
-    # Pattern: (radical do verbo) + (vogal temática com acento ou não) + (hífen) + (pronome)
-    # Grupo 1: radical (ex: "am", "vend", "descobr", "comp")
-    # Grupo 2: vogal com acento/sem acento (ex: "á", "ê", "i", "ô", "a", "e", "i", "o")
-    # Grupo 3: Pronome (lo, la, los, las, no, na, nos, nas, se, lhe, lhes)
-    
-    # Lista de pronomes enclíticos e suas variações
-    pronouns_enclitic_endings = ['lo', 'la', 'los', 'las', 'no', 'na', 'nos', 'nas', 'se', 'lhe', 'lhes']
-    
-    # Regex para capturar verbos com pronome e transformar em infinitivo
-    # \w+ : Radical do verbo
-    # [aáeéíóôuú] : vogal temática (com ou sem acento)
-    # -(?:lo|la|los|las|no|na|nos|nas|se|lhe|lhes) : O hífen e o pronome (?: para grupo não capturante)
-    # A regex precisa capturar o radical e a vogal que precede o -r (que foi omitido)
-    
-    # Forma mais robusta: identificar se termina em -[pronome]
-    # E se a parte antes do hífen parece um verbo (termina em vogal, etc.)
-    
-    # Lógica 2.a) se a palavra termina em -o, -a, -os, -as, -no, -na, -nos, -nas, -se (incluindo o hífen)
-    # Isso já está parcialmente coberto pelo for ending in pattern1_endings
     pattern1_endings_with_hyphen = ['-o', '-a', '-os', '-as', '-no', '-na', '-nos', '-nas', '-se', '-lhe', '-lhes']
     
     for ending in pattern1_endings_with_hyphen:
         if word_form_lower.endswith(ending):
-            part_before_pronoun = word_form_lower.rsplit(ending, 1)[0] # Pega a parte ANTES do pronome (ex: "abandona", "vende")
+            part_before_pronoun = word_form_lower.rsplit(ending, 1)[0]
             if part_before_pronoun:
                 candidates_for_lexicon_check.append(part_before_pronoun)
                 
-                # Para casos como "amar-lhe" ou "vender-lhe" (se tokenizado como tal)
                 if part_before_pronoun.endswith('r'):
-                    candidates_for_lexicon_check.append(part_before_pronoun) # Adiciona "amar"
-                    candidates_for_lexicon_check.append(part_before_pronoun[:-1]) # Adiciona "ama"
+                    candidates_for_lexicon_check.append(part_before_pronoun) 
+                    candidates_for_lexicon_check.append(part_before_pronoun[:-1]) 
                     
-    # Lógica 2.b) para terminações verbais específicas (amá-lo, vendê-la, descobri-los, compô-las)
-    # Mais robusto que .replace() com slice de tamanho fixo
-    
-    # Infinitivos terminados em AR (amAR)
     match_ar = re.match(r'(.+)á-(?:lo|la|los|las)$', word_form_lower)
     if match_ar:
-        candidates_for_lexicon_check.append(match_ar.group(1) + 'ar') # Ex: "amá-lo" -> "amar"
+        candidates_for_lexicon_check.append(match_ar.group(1) + 'ar') 
 
-    # Infinitivos terminados em ER (vendER)
     match_er = re.match(r'(.+)ê-(?:lo|la|los|las)$', word_form_lower)
     if match_er:
-        candidates_for_lexicon_check.append(match_er.group(1) + 'er') # Ex: "vendê-la" -> "vender"
+        candidates_for_lexicon_check.append(match_er.group(1) + 'er') 
 
-    # Infinitivos terminados em IR (descobrIR)
     match_ir = re.match(r'(.+)i-(?:lo|la|los|las)$', word_form_lower)
     if match_ir:
-        candidates_for_lexicon_check.append(match_ir.group(1) + 'ir') # Ex: "descobri-los" -> "descobrir"
+        candidates_for_lexicon_check.append(match_ir.group(1) + 'ir') 
     
-    # Infinitivos terminados em OR (compOR) - menos comum mas existe
     match_or = re.match(r'(.+)ô-(?:lo|la|los|las)$', word_form_lower)
     if match_or:
-        candidates_for_lexicon_check.append(match_or.group(1) + 'or') # Ex: "compô-lo" -> "compor"
+        candidates_for_lexicon_check.append(match_or.group(1) + 'or') 
 
-    # Remove duplicatas e retorna
     return list(set(candidates_for_lexicon_check))
 
 # --- Função de Engenharia de Features para Predição (EXISTENTE) ---
@@ -354,84 +324,48 @@ class NeologismDetector:
                 continue 
 
             for token in chunk_doc:
+                # CORREÇÃO AQUI: Definir original_word e word_lower (a partir do token.text)
+                # para que eles existam no escopo do loop.
+                original_word = token.text # <-- CORREÇÃO
+                word_lower = token.text.lower() # <-- CORREÇÃO
+                
                 if token.is_space:
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
-                        processed_html_parts.append(token.text)
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
                 if token.is_punct or token.like_num:
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
-                        processed_html_parts.append(token.text + token.whitespace_)
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
 
-                # A palavra original como tokenizada pelo spaCy
-                original_word_as_tokenized = token.text 
-                word_lower_as_tokenized = token.text.lower() # Versão lowercase do token original
-                
-                # === NOVO: LIMPEZA MAIS RIGOROSA E CONSISTENTE ===
-                # Passo 1: Remover todos os caracteres que NÃO são letra ou hífen.
-                # Regex para manter apenas letras (minúsculas e maiúsculas) e hífen.
-                # Isso vai lidar com "PN", "PETR4", "abrilDa" etc.
-                # A intenção é que sigas como "NPC" ou "JBS" não sejam limpas para vazio.
-                # [a-zA-ZáàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ\-]
-                # Melhor usar o word_lower_as_tokenized para a limpeza que vai pro DB.
-                # Para a ORIGINAL_WORD que vai pro display, manter o case.
-                
-                # Limpeza para a palavra que vai ser consultada no léxico e Dicio
-                # (deve ser minúscula e sem caracteres especiais, exceto hífen)
-                temp_clean_word_lower = re.sub(r'[^a-z0-9áàâãéêíóôõúüç\-]', '', word_lower_as_tokenized) # Permite números também para siglas como PETR4
-                temp_clean_word_lower = re.sub(r'-{2,}', '-', temp_clean_word_lower).strip('-')
+                # === LIMPEZA MAIS RIGOROSA DE CARACTERES NÃO-ALFABÉTICOS E HÍFENS ===
+                # Estas são as variáveis que passarão por limpeza profunda.
+                # Não sobrescreva original_word e word_lower que vêm do token.text
+                temp_clean_word_lower = re.sub(r'[^a-z0-9áàâãéêíóôõúüç\-]', '', word_lower)
+                temp_clean_original_word = re.sub(r'[^a-zA-Z0-9áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ\-]', '', original_word) # Adicionado caracteres maiúsculos
 
-                # Limpeza para a palavra original que pode ir para o display ou CSV
-                # (mantém a capitalização original)
-                temp_clean_original_word = re.sub(r'[^a-zA-Z0-9áàâãéêíóôõúüç\-]', '', original_word_as_tokenized)
+                temp_clean_word_lower = re.sub(r'-{2,}', '-', temp_clean_word_lower).strip('-')
                 temp_clean_original_word = re.sub(r'-{2,}', '-', temp_clean_original_word).strip('-')
 
-                # === NOVO: FILTRAR PALAVRAS COM CARACTERES ESPECIAIS INTERNOS INESPERADOS ===
-                # Para casos como "abaixo).Até" ou "CBF.A" ou "(APP).O"
-                # A ideia é que se o token original tinha um '.' ou '(' ou ')' INTERNO
-                # e não era só pontuação ao redor, ele não é uma palavra válida para análise.
-                # Isso depende do que você considera uma "palavra". Se "CBF.A" é um token válido,
-                # e você quer ele como "CBFA", a regex acima já limpa.
-                # Se você quer IGNORAR tokens como "abaixo).Até" COMPLETAMENTE, precisamos de um filtro adicional AQUI:
-                
-                # Reavalie o `token.is_punct` e `token.like_num`.
-                # Se `token.text` contiver caracteres que não são letras/hífens/números, *após a remoção de pontuação externa*,
-                # ou se a `original_word_as_tokenized` for muito diferente da `temp_clean_original_word`.
-                
-                # Uma forma de ignorar "abaixo).Até" é verificar se o token contêm caracteres especiais que não sejam o hífen
-                # e que não sejam pontuação que o spaCy já classifica como tal.
-                # Ou seja, se o token tem caracteres que você não quer, após a limpeza da regex.
-                # Se `temp_clean_word_lower` for muito diferente de `word_lower_as_tokenized` em termos de caracteres.
-
-                # ABORDAGEM SIMPLIFICADA PARA IGNORAR TOKENS MALFORMADOS:
-                # Se o token_original contiver caracteres que não são alfanuméricos ou hífen
-                # E esses caracteres não foram removidos por token.is_punct.
-                # Isso já é coberto pela limpeza de `clean_word_lower` abaixo.
-                # Se `temp_clean_word_lower` ficar vazio, ele já é ignorado.
-                
-                # IMPORTANTE: Definir clean_word_lower e clean_original_word para uso no resto do código.
-                clean_word_lower = temp_clean_word_lower
-                clean_original_word = temp_clean_original_word
+                clean_word_lower = temp_clean_word_lower # A versão limpa e minúscula para consultas
+                clean_original_word = temp_clean_original_word # A versão limpa, mantendo o case original, para dados e display
 
                 if not clean_word_lower: # Se a palavra ficou vazia após a limpeza rigorosa
-                    # print(f"  Ignorando: Vazio após limpeza rigorosa ('{original_word_as_tokenized}').")
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
-                        processed_html_parts.append(original_word_as_tokenized + token.whitespace_)
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
 
-                # === NOVO: Se a palavra original tokenizada e a palavra limpa são muito diferentes
-                # e a palavra original contém caracteres inesperados, talvez ignorar.
-                # Isso é um ajuste fino, se a regex de cima não for suficiente.
-                # Ex: "CBF.A" -> "CBFA". Se você quer que "CBF.A" seja ignorado completamente,
-                # então esta lógica é necessária.
-                if re.search(r'[.!@#$%^&*()_+={}\[\]:;"\'<>,?/|\\~`]', original_word_as_tokenized) and \
-                   len(original_word_as_tokenized) > len(clean_original_word): # Token original tinha caracteres especiais internos
-                    # E o spaCy não classificou como pontuação.
-                    # Isso é uma heurística para ignorar tokens que parecem IDs, URLs ou strings malformadas.
-                    # print(f"  Ignorando: Token malformado com caracteres especiais internos ('{original_word_as_tokenized}').")
+                # NOVO FILTRO: Ignorar tokens com caracteres especiais internos que não são hífens
+                # E que a limpeza os removeu. Ex: "abaixo).Até" -> "abaixate" (removido ')', '.')
+                # Essa heurística tenta pegar IDs de arquivos, URLs parciais, etc.
+                # Se `original_word` continha algo que não `clean_original_word` tem (que não seja hífen/letra/número)
+                if len(original_word) > len(clean_original_word) and \
+                   re.search(r'[^\w\s\-]', original_word): # Procura por caracteres não alfanuméricos, não espaço, não hífen
+                    # print(f"  Ignorando: Token original muito diferente da versão limpa ('{original_word}'). Provável string malformada/ID.")
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
-                        processed_html_parts.append(original_word_as_tokenized + token.whitespace_)
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
+
 
                 total_words += 1
                 is_neologism_candidate = False
@@ -440,16 +374,16 @@ class NeologismDetector:
                 if (token.pos_ == "PROPN") or \
                    (use_full_ner_filter and token.ent_type_ in ["PERSON", "LOC", "ORG", "MISC"]):
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
-                        processed_html_parts.append(original_word + token.whitespace_)
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
 
                 if token.pos_ not in CANDIDATE_POS_TAGS:
                     if not IS_LARGE_TEXT_FOR_DISPLAY:
-                        processed_html_parts.append(original_word + token.whitespace_)
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
             
-                # 4. === VERIFICAR NO LÉXICO DO BANCO DE DADOS (NOVA LÓGICA DE PRONOMES OBLÍQUOS INSERIDA AQUI) ===
-                words_to_check_in_lexicon = normalize_enclitic_pronoun_word(clean_word_lower, token.lemma_)
+                # 4. VERIFICAR NO LÉXICO DO BANCO DE DADOS (USANDO normalize_enclitic_pronoun_word)
+                words_to_check_in_lexicon = normalize_enclitic_pronoun_word(original_word, token.lemma_) # Passar original_word para normalizer
                 
                 is_word_in_db_lexicon = False
                 for check_word in words_to_check_in_lexicon:
@@ -459,10 +393,6 @@ class NeologismDetector:
                     if CustomAddition.objects.filter(word=check_word).exists():
                         is_word_in_db_lexicon = True
                         break
-                # FIM DA LÓGICA DE PRONOMES OBLÍQUOS
-
-                # print(f"  Verificando léxico (limpo: '{clean_word_lower}', lema: '{token.lemma_}')")
-                # print(f"    Total no DB Léxico: {is_word_in_db_lexicon}") # DEBUG: Remova ou comente esta linha após teste
                 
                 if not is_word_in_db_lexicon:
                     is_in_dicio = is_word_in_dicio(clean_word_lower)
@@ -483,20 +413,39 @@ class NeologismDetector:
 
                 if is_neologism_candidate:
                     num_neologisms += 1
-                    # AQUI, clean_original_word deve conter a palavra com a capitalização original
-                    # mas sem caracteres indesejados.
-                    processed_html_parts.append(
-                        f'<span class="neologism" data-word="{html.escape(clean_original_word)}" '
-                        f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" '
-                        f'data-sent-idx="{sentence_idx_for_token}" '
-                        f'data-sentence-text="{html.escape(sentence_text_for_token)}" '
-                        f'data-predicted-formation="{html.escape(predicted_formation)}">'
-                        f'{html.escape(original_word_as_tokenized)}</span>{token.whitespace_}' # <-- Usar original_word_as_tokenized AQUI
-                    )
+                    
+                    predicted_formation = "Não classificado (ML indisponível)"
+                    if CLASSIFIER_MODEL and CHAR_VECTORIZER and EXPLICIT_FEATURE_NAMES:
+                        try:
+                            word_explicit_features_dict = create_prediction_features(clean_original_word) # Usar clean_original_word
+                            explicit_features_array = np.array([[word_explicit_features_dict.get(name, 0) for name in EXPLICIT_FEATURE_NAMES]])
+                            explicit_features_sparse = csr_matrix(explicit_features_array)
+                            
+                            char_features_single = CHAR_VECTORIZER.transform([clean_original_word]) # Usar clean_original_word
+                            
+                            X_single_word = hstack([explicit_features_sparse, char_features_single])
+                            
+                            predicted_formation = CLASSIFIER_MODEL.predict(X_single_word)[0]
+                        except Exception as e:
+                            print(f"  Erro na classificação ML para '{clean_original_word}': {e}")
+                            predicted_formation = "Erro na classificação ML"
+
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(
+                            f'<span class="neologism" data-word="{html.escape(clean_original_word)}" ' # data-word é limpo
+                            f'data-original-pos="{token.pos_}" data-pos="{POS_MAPPING.get(token.pos_, token.pos_)}" data-lemma="{html.escape(token.lemma_)}" '
+                            f'data-sent-idx="{sentence_idx_for_token}" '
+                            f'data-sentence-text="{html.escape(sentence_text_for_token)}" '
+                            f'data-predicted-formation="{html.escape(predicted_formation)}">'
+                            f'{html.escape(original_word)}</span>{token.whitespace_}' # Aqui original_word (sem limpeza)
+                        )
+                    else:
+                        processed_html_parts.append(original_word + token.whitespace_) # Aqui original_word (sem limpeza)
+
                     if clean_word_lower not in seen_neologism_candidates_global: 
                         all_neologism_candidates.append({ 
-                            'word': clean_original_word, # <--- Usar clean_original_word aqui
-                            'word_lower': clean_word_lower,
+                            'word': clean_original_word, # Usar clean_original_word aqui
+                            'word_lower': clean_word_lower, # Usar clean_word_lower aqui
                             'original_pos': token.pos_,
                             'pos': POS_MAPPING.get(token.pos_, token.pos_),
                             'lemma': token.lemma_,
@@ -506,7 +455,10 @@ class NeologismDetector:
                         })
                         seen_neologism_candidates_global.add(clean_word_lower) 
                 else:
-                    processed_html_parts.append(original_word_as_tokenized + token.whitespace_) # <--- Usar original_word_as_tokenized AQUI 
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
+                    else:
+                        processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
 
         return {
             'processed_text_html': "".join(processed_html_parts) if not IS_LARGE_TEXT_FOR_DISPLAY else "", 
