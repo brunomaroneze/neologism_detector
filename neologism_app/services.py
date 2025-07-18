@@ -366,6 +366,22 @@ class NeologismDetector:
                         processed_html_parts.append(original_word + token.whitespace_) # Usa original_word
                     continue
 
+                # === NOVO FILTRO: IGNORAR PADRÕES DE HORA (ex: 9h, 22h30) ===
+                # Padrão: Começa com 1 ou 2 dígitos, seguido por 'h', opcionalmente seguido por 2 dígitos.
+                # Regex: ^\d{1,2}h(\d{2})?$
+                # ^\d{1,2}: Início da string, 1 ou 2 dígitos (ex: 9, 22)
+                # h: o caractere 'h' literal
+                # (\d{2})?: Opcionalmente, 2 dígitos (ex: 30 em 22h30)
+                
+                # Para ser mais abrangente, considerar variações como "9h30min" ou "14:00h" se necessário,
+                # mas o pedido inicial é focado em "Xh" e "XhXX".
+                
+                # Vamos testar a `clean_word_lower` para este padrão.
+                if re.match(r'^\d{1,2}h(\d{2})?$', clean_word_lower):
+                    print(f"  Ignorando: Padrão de hora detectado ('{original_word}').")
+                    if not IS_LARGE_TEXT_FOR_DISPLAY:
+                        processed_html_parts.append(original_word + token.whitespace_)
+                    continue
 
                 total_words += 1
                 is_neologism_candidate = False
