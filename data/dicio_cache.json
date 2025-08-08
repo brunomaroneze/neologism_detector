@@ -1,5 +1,4 @@
 {
-    "jong-un": false,
     "ideia": false,
     "n": true,
     "bets": false,
@@ -1795,5 +1794,7 @@
     "superprotetora": false,
     "wando": false,
     "sa": false,
-    "ex-senador": false
+    "ex-senador": false,
+    "tarifaco": true,
+    "ecossexual": false
 }
